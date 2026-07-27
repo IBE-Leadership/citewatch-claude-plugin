@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "citewatch": {
+      "type": "http",
+      "url": "https://citewatch.app/mcp"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "citewatch",
+  "displayName": "CiteWatch",
+  "description": "Connects Claude to the CiteWatch citation-auditing MCP server and installs the audit-quality skill in one step.",
+  "author": {
+    "name": "CiteWatch",
+    "email": "support@citewatch.app",
+    "url": "https://citewatch.app"
+  },
+  "homepage": "https://citewatch.app",
+  "repository": "https://github.com/leonjvr/citewatch-plugin",
+  "license": "MIT",
+  "keywords": ["citation", "academic", "research", "citation-audit", "retraction", "bibliography"]
+}
