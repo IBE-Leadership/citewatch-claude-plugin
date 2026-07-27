@@ -8,7 +8,7 @@
     "url": "https://citewatch.app"
   },
   "homepage": "https://citewatch.app",
-  "repository": "https://github.com/leonjvr/citewatch-plugin",
+  "repository": "https://github.com/IBE-Leadership/citewatch-claude-plugin",
   "license": "MIT",
   "keywords": ["citation", "academic", "research", "citation-audit", "retraction", "bibliography"]
 }

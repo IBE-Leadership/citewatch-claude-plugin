@@ -19,7 +19,7 @@ account (or create one — the first 50 reference checks are free).
 ## Install
 
 ```
-/plugin marketplace add leonjvr/citewatch-plugin
+/plugin marketplace add IBE-Leadership/citewatch-claude-plugin
 /plugin install citewatch@citewatch
 ```
 

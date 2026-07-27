@@ -7,7 +7,7 @@ citation-auditing MCP server and installs its audit-quality skill in one step.
 ## Install
 
 ```
-/plugin marketplace add leonjvr/citewatch-plugin
+/plugin marketplace add IBE-Leadership/citewatch-claude-plugin
 /plugin install citewatch@citewatch
 ```
 
