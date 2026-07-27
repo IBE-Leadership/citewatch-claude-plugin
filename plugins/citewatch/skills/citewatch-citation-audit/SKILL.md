@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.4"
+  version: "1.5"
 ---
 
 # CiteWatch citation audit workflow
@@ -51,7 +51,65 @@ for: stray text pulled in from tracked-changes/comments, merged or
 truncated year ranges, dropped entries, and citations split across a
 page/line break that got joined incorrectly.
 
-## 2. Run the free checks first, and treat their output as leads, not verdicts
+## 2. Locate the reference list reliably, and track long documents as you go
+
+### Finding the reference list
+
+Don't search for a single heading text and stop. Reference lists appear
+under many different headings depending on discipline and referencing
+style -- check for all of: "References", "Bibliography", "Works Cited",
+"Reference List", "Literature Cited", "Sources", "Sources Cited", and
+"Notes" (some humanities/Chicago-style documents fold citations into a
+notes section rather than a separate list) -- case-insensitively, and
+without assuming singular vs. plural. If a search for one heading comes
+back empty, that is evidence the heading is different, not evidence the
+document has no reference list -- broaden the search before concluding
+otherwise.
+
+Also check explicitly whether the document has **one master list at the
+end, or a separate reference list per chapter/section** (common in
+theses, edited volumes, and compiled reports). Skimming only the very
+end of the document will miss per-chapter lists entirely. Confirm which
+structure you're dealing with before extraction, not after.
+
+### Large or multi-chapter documents: work from a persistent tracking file
+
+For a document long enough that holding the full state in conversation
+context risks losing track of what's been verified (many chapters, a
+large reference list, or a per-chapter reference-list structure), don't
+try to carry all of it in memory across the whole audit. Instead:
+
+1. Before calling any verification tool, make one full pass across the
+   *entire* document (every chapter/section) to build a single merged
+   reference list -- combine per-chapter lists into one set, and for
+   every unique reference, record **every** chapter/section and
+   page (or best available location) where it's cited in-text. The same
+   title/author/year appearing in two different chapters is one
+   reference cited twice, not two references -- merge it, don't verify
+   it twice.
+2. Write this out as a working data file (e.g. a JSON or Markdown table)
+   before verifying anything -- one row per unique reference, with the
+   reference string, every citing location, and a status field starting
+   at "not yet checked". If you have file-write access in this
+   environment, save and update this file on disk as you go rather than
+   holding it only in the conversation -- a long audit can span more
+   turns than comfortably fit in one context window, or cross a session
+   boundary, and a saved file lets you resume exactly where you left off
+   instead of re-deriving progress or silently re-scanning chapters
+   you've already covered.
+3. Verify chapter by chapter (or in whatever chunks keep each pass
+   manageable) against this file: the first time you reach a given
+   reference, verify it and mark the file's status field with the
+   result; every later chapter that cites the same reference reads the
+   already-recorded result instead of calling the tool again. Never
+   re-verify a reference just because it recurs later in the document --
+   that spends credits on a call whose answer you already have.
+4. By the last chapter, the tracking file already holds every
+   reference's full citing-location history and verification result --
+   build the Full Verification Table and Orphan Citations sections
+   directly from it rather than re-deriving them from memory.
+
+## 3. Run the free checks first, and treat their output as leads, not verdicts
 
 `check_citation_reference_balance` and `check_referencing_style_consistency`
 are free (no credits) but are pure local matching over the citation lists
@@ -67,7 +125,7 @@ document.
 `check_journal_quality` and `check_retraction_status` are also free and
 can be run per matched source without affecting the credit budget.
 
-## 3. Before spending any paid credits, check the budget and ask if it's tight
+## 4. Before spending any paid credits, check the budget and ask if it's tight
 
 `verify_reference` and `verify_manuscript_references` cost 1 credit each
 (per reference). `search_literature` costs 5 credits per call and
@@ -91,7 +149,7 @@ doing it. What must never happen is spending down to zero and then
 continuing anyway on the model's own knowledge without the user having
 agreed to that scope.
 
-## 4. If you hit `insufficient_credits`, stop -- this is not optional
+## 5. If you hit `insufficient_credits`, stop -- this is not optional
 
 Every metered tool returns a response containing `"error":
 "insufficient_credits"` and `"action_required": "STOP"` when the account
@@ -112,7 +170,7 @@ references were processed vs. requested). When this happens:
   there -- don't pad the rest of the report with guesses to make it look
   complete.
 
-## 5. Standard report format
+## 6. Standard report format
 
 When the user asks for a written audit report (as opposed to a quick
 chat answer), use this structure every time, so output is consistent
@@ -166,7 +224,9 @@ Legend:
 Table columns: `#`, `Entry` (as cited), `Status`, `Confidence` (from
 `match_confidence`, or "N/A" if unmatched), `Notes` (the specific
 mismatched field, retraction reason, or journal-quality concern --
-concrete, not vague).
+concrete, not vague). For a document processed via the tracking file in
+step 2, add a `Cited from` column listing every chapter/page location on
+record for that reference, instead of just the first one encountered.
 
 ### 3. Orphan Citations
 
@@ -233,16 +293,16 @@ Norwegian Register, DOAJ). Proprietary/subscription-only indices (e.g.
 Scopus, Web of Science, Scimago) are not queried and this report cannot
 comment on standing in those specific databases.
 
-Independent verification certificate: <certificate_url from step 6 below>
+Independent verification certificate: <certificate_url from step 7 below>
 Scan the QR code or open the link to see CiteWatch's own record of what
 was verified, independent of this report's text.
 ```
 
 Do not paraphrase the arXiv citation or the scope note away -- both are
 required, verbatim in substance, on every report. Only include the
-certificate line if step 6 actually produced one -- never invent a URL.
+certificate line if step 7 actually produced one -- never invent a URL.
 
-## 6. Generate a verification certificate before finishing
+## 7. Generate a verification certificate before finishing
 
 If any paid verification ran (`verify_reference` or
 `verify_manuscript_references` was called at least once, even partially),
