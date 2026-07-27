@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.5"
+  version: "1.6"
 ---
 
 # CiteWatch citation audit workflow
@@ -51,6 +51,25 @@ for: stray text pulled in from tracked-changes/comments, merged or
 truncated year ranges, dropped entries, and citations split across a
 page/line break that got joined incorrectly.
 
+Never let categories of extracted data bleed into each other when
+assembling a tool-call payload. In particular, the bibliography/
+reference-list array you send to a tool must contain *only* entries that
+appear verbatim in the document's own reference list -- never a source
+you've identified as orphaned or missing from the bibliography, a
+foundational/theory source you recognize from general knowledge, or a
+leftover test entry from earlier in the session, even briefly, even just
+to test a tool call. This has happened in practice: a foundational-theory
+source correctly flagged as an orphaned in-text citation (missing from
+the bibliography) got carried over into the bibliography array itself
+when building a `check_referencing_style_consistency` payload, silently
+contaminating the input. Before calling any tool that takes a references/
+bibliography list, confirm every single entry has a literal, verbatim
+location in the document's own reference-list section -- if you can't
+point to where it appears, remove it before calling the tool, not after.
+This class of error is easy to make and hard to catch afterward, because
+these tools trust the input list completely and have no way to
+distinguish a genuine entry from a contaminating one.
+
 ## 2. Locate the reference list reliably, and track long documents as you go
 
 ### Finding the reference list
@@ -90,7 +109,12 @@ try to carry all of it in memory across the whole audit. Instead:
 2. Write this out as a working data file (e.g. a JSON or Markdown table)
    before verifying anything -- one row per unique reference, with the
    reference string, every citing location, and a status field starting
-   at "not yet checked". If you have file-write access in this
+   at "not yet checked". Keep orphaned/missing-from-bibliography
+   candidates (in-text citations with no matching reference-list entry)
+   in a clearly separate field or file from this table -- never merge
+   them in, even temporarily, per the extraction-integrity note in step 1
+   above; a tool call built from this file must only ever draw from the
+   genuine-bibliography rows. If you have file-write access in this
    environment, save and update this file on disk as you go rather than
    holding it only in the conversation -- a long audit can span more
    turns than comfortably fit in one context window, or cross a session
