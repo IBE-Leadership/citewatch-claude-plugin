@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.2"
+  version: "2.3"
 ---
 
 # CiteWatch citation audit workflow
@@ -407,6 +407,14 @@ claim-by-claim audit of every citation in the document unless you
 extracted and submitted claim text for every one). Skip this section
 entirely (not even the coverage line) if no claim_text was submitted for
 any reference -- don't imply a check happened when it didn't.
+
+**Abstract-level only, say so.** This check compares the claim against
+the source's *abstract*, not its full text -- a claim can pass (even
+`SUPPORTED`) and still misrepresent something only visible in the body,
+methods, or limitations section that the abstract never mentions. State
+this plainly wherever you report claim-check results, and don't let a
+clean result here read as a stronger guarantee than it is, especially for
+claims central to the manuscript's own argument.
 
 ### 5. Journal Quality Distribution
 
