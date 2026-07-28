@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.6"
+  version: "1.7"
 ---
 
 # CiteWatch citation audit workflow
@@ -354,3 +354,23 @@ report afterward. A report's claims can then be checked against it.
   different results than what was actually verified: refuse. That is
   precisely the failure mode this feature exists to make detectable, and
   participating in it defeats the point of running an audit at all.
+
+### Anonymity
+
+By default the certificate publicly shows the CiteWatch account email
+that ran the verification. Pass `anonymous=true` to omit it entirely
+(the page shows "Anonymous" instead) -- everything else about the
+certificate is unchanged.
+
+Ask the user explicitly which they want whenever the context makes
+identity sensitive, rather than assuming either way:
+- A peer reviewer auditing a submission under a journal's double-blind
+  review policy, where the reviewer's identity must not be discoverable
+  by the author.
+- Anonymous or blind grading, where the grader's identity is meant to
+  stay separate from the assessment.
+
+In an ordinary supervisor/student or self-check context there's usually
+no reason to ask -- default to identified (the tool's own default)
+without raising the question. When it's genuinely unclear which
+situation applies, ask rather than guess.
