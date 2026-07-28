@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.1"
+  version: "2.2"
 ---
 
 # CiteWatch citation audit workflow
@@ -70,6 +70,32 @@ This class of error is easy to make and hard to catch afterward, because
 these tools trust the input list completely and have no way to
 distinguish a genuine entry from a contaminating one.
 
+### Extract the citing claim text alongside each reference
+
+Whenever a reference is used to support a specific finding, statistic, or
+conclusion in the document's body text (not just a bare mention), extract
+that sentence too and send it as `claim_text` on that reference's own
+call. If supplied and an abstract is found, the server automatically
+checks the claim against the abstract server-side -- including for
+methodological over-generalization (see step 6's Contextual Misuse Flags
+section) -- so this is genuinely worth doing across the manuscript, not
+just for a few spot-checked claims, wherever the body text makes an
+attributable claim to a reference.
+
+**When one sentence cites two or more references together** (e.g. "Prior
+work has found X (Smith, 2020; Jones, 2019; Lee, 2021)"), include the
+*same* `claim_text` on **each** of those references' own entries in the
+tool call -- not just the first one. Each cited source gets checked
+independently against the identical claim; a reference silently dropped
+from this because it wasn't first in the list never gets checked at all.
+If the sentence instead attributes *different, source-specific* findings
+to each reference (e.g. "Smith (2020) found X while Jones (2019) found
+Y"), extract each reference's own specific portion as its `claim_text`
+rather than sending the whole combined sentence to all of them -- send
+the most specific attributable text for each source, falling back to the
+full shared sentence only when the text doesn't distinguish per-source
+attribution.
+
 ## 2. Locate the reference list reliably, and track long documents as you go
 
 ### Finding the reference list
@@ -132,17 +158,31 @@ try to carry all of it in memory across the whole audit. Instead:
    Chapter boundaries are about bookkeeping, not the right unit for the
    actual `verify_manuscript_references` **call size** -- a single
    chapter can have anywhere from a handful to 100+ references. Batch the
-   *tool calls* independently of chapter structure: send **~20-25
-   references per `verify_manuscript_references` call**, not a single
-   huge call for the whole bibliography (a very large batch can run
-   several minutes, especially if several references need the automatic
-   web-search/scrape escalation, and a long-running single call has more
-   that can interrupt it along the way). If a batch call errors out or
-   the connection drops partway through, just call it again with the
-   same batch (or continue with the remaining references) -- the server
+   *tool calls* independently of chapter structure: send **~10 references
+   per `verify_manuscript_references` call** (smaller, ~5, if you're also
+   sending `claim_text` for most entries in the batch -- the automatic
+   claim-vs-abstract check adds a real extra step per reference, so a
+   batch that size takes meaningfully longer than the same size did
+   before that feature existed), not a single huge call for the whole
+   bibliography (a very large batch can run several minutes, especially
+   if several references need the automatic web-search/scrape escalation
+   or claim check, and a long-running single call has more that can
+   interrupt it along the way). If a batch call errors out or the
+   connection drops partway through, just call it again with the same
+   batch (or continue with the remaining references) -- the server
    detects anything already verified and not yet certified and returns
    it for free (`resumed_from_earlier_call: true`) instead of redoing the
    work and charging twice, so retrying is always safe.
+
+   Batches don't have to be sent one at a time, either -- if your
+   environment lets you make multiple tool calls concurrently, you can
+   fire several `verify_manuscript_references` batches in parallel to cut
+   the audit's total wall-clock time, rather than waiting for each batch
+   to finish before starting the next. The server handles this safely: if
+   two concurrent calls ever verify the exact same reference at once, a
+   database-level check on its side means only one is actually recorded
+   and charged, and the other automatically gets refunded and reflects
+   that same result instead of creating a conflicting duplicate.
 4. By the last chapter, the tracking file already holds every
    reference's full citing-location history and verification result --
    build the Full Verification Table and Orphan Citations sections
@@ -167,13 +207,15 @@ can be run per matched source without affecting the credit budget.
 ## 4. Before spending any paid credits, check the budget and ask if it's tight
 
 `verify_reference` and `verify_manuscript_references` cost 1 credit each
-(per reference). `search_literature` costs 5 credits per call and
-`assess_claim_support` costs 3 credits per call -- both cost meaningfully
-more per call than a single reference verification, so factor that in
-when estimating whether a balance covers a planned sequence of calls, not
-just a flat per-tool-call count. Call `get_credit_balance` (free) before
-committing to a full-manuscript verification pass. If the reference count
-exceeds the available balance,
+(per reference), plus a small fractional add-on whenever the automatic
+web-search/scrape escalation or claim-vs-abstract check actually fires
+for that reference (a few thousandths of a credit each -- see `Notes`
+guidance below; never a whole extra credit). `search_literature` costs 5
+credits per call -- meaningfully more than a single reference
+verification, so factor that in when estimating whether a balance covers
+a planned sequence of calls, not just a flat per-tool-call count. Call
+`get_credit_balance` (free) before committing to a full-manuscript
+verification pass. If the reference count exceeds the available balance,
 stop and ask the user how to proceed rather than silently deciding for
 them -- for example:
 
@@ -262,6 +304,23 @@ direct bibliographic-index match -- never fold these into the plain
 when their count is zero (write `0 (0%)` explicitly, same discipline as
 "Not checked").
 
+If any `claim_text` was submitted anywhere in the audit, add two more
+rows immediately after the table above, percentaged against the number of
+claims actually **checked** (i.e. had `claim_support.checked: true`), not
+against total bibliography entries -- most entries typically won't have
+had a claim submitted at all, so "% of total" would understate things:
+
+| Metric | Count (% of claims checked) |
+|---|---|
+| Cited claims checked against abstract | total `claim_support.checked: true` count (this row alone is % of total bibliography entries, not of itself) |
+| Flagged: unsupported, contradicted, or methodology mismatch | `claim_support.verdict` in `NOT_SUPPORTED`/`CONTRADICTED`, or `claim_support.methodology_flag` set |
+
+Omit both rows entirely if no claims were checked at all (rather than
+writing `0 (0%)`) -- unlike the escalation rows above, which reflect
+something the server does automatically for every reference, this only
+ever reflects a scope decision you made about which claims to submit, so
+its absence needs no explicit zero to be self-explanatory.
+
 Follow with a short **Critical Issues** list (numbered, most severe
 first) -- confirmed retractions, foundational/heavily-cited sources that
 are orphaned, and any entry where the reference-list text itself is too
@@ -293,8 +352,9 @@ it. It surfaces in the response as:
 - `escalation.grey_literature` -- see **[GL]** above.
 - `credits_charged` may include a small fractional amount on top of the
   flat per-reference cost (e.g. `1.0072` instead of `1`) when one of these
-  steps fired. Just report the actual number returned -- nothing about
-  the insufficient-credits handling above changes.
+  steps fired, or when the claim-vs-abstract check ran (see step 6.4).
+  Just report the actual number returned -- nothing about the
+  insufficient-credits handling above changes.
 
 Table columns: `#`, `Entry` (as cited), `Status`, `Confidence` (from
 `match_confidence`, or "N/A" if unmatched), `Notes` (the specific
@@ -314,13 +374,39 @@ those fastest.
 
 ### 4. Contextual Misuse Flags
 
-Where `claim_text` was checked against a retrieved abstract (directly by
-you, or via `assess_claim_support`) and the source doesn't actually
-support how it's cited, or its real topic doesn't match the claim it's
-attached to, list it here: citation, actual topic (from `matched_metadata`),
-how it's used in the document, and the concern. Skip this section
-entirely if no claim-support checking was done -- don't imply a check
-happened when it didn't.
+Whenever you submitted `claim_text` for a reference and an abstract was
+found, the server automatically judged whether the abstract actually
+supports the claim, returning this on that reference's result as
+`claim_support`: `checked` (bool), `verdict` (`SUPPORTED` /
+`PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` / `CONTRADICTED` /
+`CANNOT_ASSESS`), `confidence`, `rationale`, and -- independent of that
+verdict -- `methodology_flag`/`methodology_note` for methodological
+over-generalization: a claim that generalizes, universalizes, or assigns
+causation beyond what the cited study's own methodology (sample size,
+qualitative/quantitative design, scope) can actually support. A citation
+can be `SUPPORTED` (an accurate paraphrase of the finding itself) and
+still carry a `methodology_flag` -- treating a small qualitative study's
+findings as if broadly, quantitatively generalizable, or a correlational
+finding as if causal, is a distinct error from misquoting the finding,
+and both matter for this section.
+
+List every entry here where `claim_support.checked` is true and either
+the verdict is `NOT_SUPPORTED`/`CONTRADICTED`, or `methodology_flag` is
+set: citation, actual topic (from `matched_metadata`), how it's used in
+the document, and the concern (`claim_support.rationale` and/or
+`methodology_note`, in your own words if that reads better). This is a
+second, independent check, not a replacement for your own reading --
+also flag anything you notice yourself that the automatic check didn't
+catch or that came back `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as
+you always could.
+
+State the coverage explicitly at the top of this section: how many
+claims were checked out of how many references in the bibliography (this
+only ever covers references you supplied `claim_text` for -- it is not a
+claim-by-claim audit of every citation in the document unless you
+extracted and submitted claim text for every one). Skip this section
+entirely (not even the coverage line) if no claim_text was submitted for
+any reference -- don't imply a check happened when it didn't.
 
 ### 5. Journal Quality Distribution
 
