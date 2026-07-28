@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.5"
+  version: "2.6"
 ---
 
 # CiteWatch citation audit workflow
@@ -131,7 +131,7 @@ options, rather than silently deciding for them:
 If there's no chance to ask (an unattended/automated run), reason it
 through yourself, pick the option the manuscript's size and stakes
 actually justify, and **say so explicitly in the report** -- see step
-6.4's Contextual Misuse Flags section, which now requires this decision
+6.5's Contextual Misuse Flags section, which now requires this decision
 to be stated outright rather than left to be inferred from an absent
 section. A reader should never have to guess whether usage/claim-support
 checking was considered and deliberately scoped down, or simply never
@@ -405,6 +405,8 @@ categories represent, not just an absolute number:
 | Grey literature / non-academic source | `escalation.grey_literature` present -- see **[GL]** below |
 | Unverifiable (no match found) | `matched: false` and no `escalation.grey_literature` |
 | Retracted | `retraction.is_retracted: true` |
+| Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | at least one `metadata_checks` field has `status: "mismatch"` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
+| Duplicate reference entries | from `generate_verification_certificate`'s `duplicate_reference_groups` (only available after that tool has been called -- see its own section below) |
 | In-text citations missing from bibliography | `orphaned_citations` count |
 | Reference entries never cited | `unused_references` count |
 | Not checked (credit limit / scope decision) | explicit count, never omitted |
@@ -443,7 +445,7 @@ malformed to identify (no title, no year, etc.) belong here first.
 
 Legend:
 - **[OK]** `matched: true`, no `metadata_checks` mismatches, not retracted, no journal-quality concern.
-- **[!!]** `matched: true` but a `metadata_checks` field (title/authors/year/venue) shows `mismatch`, or `match_confidence` is low, or journal quality is flagged as a concern, or `match_method` is `"web_search"` (see below).
+- **[!!]** `matched: true` but a `metadata_checks` field (title/authors/year/venue/volume/issue/pages) shows `mismatch`, or `match_confidence` is low, or journal quality is flagged as a concern, or `match_method` is `"web_search"` (see below). A volume/issue/pages mismatch can mean the wrong paper was matched, but just as often means the reference-list entry itself is incomplete or has a typo (e.g. a missing volume number) -- present it as "check this entry's completeness," not as an accusation that the wrong source was found.
 - **[??]** `matched: false` -- genuinely unverifiable against open bibliographic data. This is **not** an accusation of fabrication -- say so explicitly, matching the header's methodology note.
 - **[GL]** `escalation.grey_literature` is present -- not an academic paper (a government report, industry white paper, standard, etc. with no index entry to match against), but the server captured its full text and wrote a summary directly from the cited source. Present `escalation.grey_literature.summary` here, and don't mark it "Unverifiable" -- it's a different, more informative status than a plain no-match.
 - **[XX]** Confirmed critical: `retraction.is_retracted: true`, or the reference-list entry itself is too malformed to identify (not a matching judgment call -- an observable fact about the entry as written).
@@ -465,7 +467,7 @@ it. It surfaces in the response as:
 - `escalation.grey_literature` -- see **[GL]** above.
 - `credits_charged` may include a small fractional amount on top of the
   flat per-reference cost (e.g. `1.0072` instead of `1`) when one of these
-  steps fired, or when the claim-vs-abstract check ran (see step 6.4).
+  steps fired, or when the claim-vs-abstract check ran (see step 6.5).
   Just report the actual number returned -- nothing about the
   insufficient-credits handling above changes.
 
@@ -496,7 +498,28 @@ Verification Table or Executive Summary counts above -- they describe a
 different thing (no genuine reference-list attribution exists to verify
 against) and belong only in this section.
 
-### 4. Contextual Misuse Flags
+### 4. Duplicate Reference Entries
+
+From `generate_verification_certificate`'s `duplicate_reference_groups` --
+only available after that tool has been called (step 7), so this section
+can only be written at the very end, alongside the closing certificate
+block, not earlier. Each group lists two or more reference-list entries
+that CiteWatch independently resolved to the same underlying source
+(matched by DOI, or by normalized title + first author + year when there's
+no DOI) -- either the same paper cited twice under different wording, or a
+genuine duplicate bibliography entry.
+
+List every group: how many entries it contains, and the reference strings
+as submitted, verbatim. State plainly that a duplicate group doesn't by
+itself mean the bibliography is *wrong* -- it can be an intentional
+re-citation the author formatted inconsistently, or a genuine accidental
+duplicate; either way it's worth the user's attention, but present it as
+something to check, not a confirmed error. Skip this section entirely
+(don't write a "no duplicates found" line) if `duplicate_reference_groups`
+comes back empty -- same discipline as the Contextual Misuse Flags
+section below for an empty result.
+
+### 5. Contextual Misuse Flags
 
 Whenever you submitted `claim_text` for a reference and an abstract was
 found, the server automatically judged whether the abstract actually
@@ -554,7 +577,7 @@ this plainly wherever you report claim-check results, and don't let a
 clean result here read as a stronger guarantee than it is, especially for
 claims central to the manuscript's own argument.
 
-### 5. Journal Quality Distribution
+### 6. Journal Quality Distribution
 
 Aggregate `journal_quality` across matched references into a table
 (category, count, examples) -- e.g. accredited/indexed, not
@@ -562,7 +585,7 @@ matched/no record, flagged by DHET/Norwegian Register/DOAJ standing.
 **Do not** characterize this as covering Scopus/Web of Science/Scimago
 quartile data -- see the closing note below on why.
 
-### 6. Recommendations (Prioritised)
+### 7. Recommendations (Prioritised)
 
 - **Priority 1 -- Critical (must fix):** confirmed retractions, orphaned
   foundational sources, malformed entries that can't be identified.
@@ -571,7 +594,7 @@ quartile data -- see the closing note below on why.
 - **Priority 3 -- Recommended:** journal-quality concerns worth
   reviewing, formatting standardization.
 
-### 7. Conclusion
+### 8. Conclusion
 
 A short paragraph. State the coverage caveat here in the *opening*
 sentence if verification was partial (e.g. "10 of 114 references were
