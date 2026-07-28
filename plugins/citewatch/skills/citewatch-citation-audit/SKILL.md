@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.7"
+  version: "1.8"
 ---
 
 # CiteWatch citation audit workflow
@@ -346,6 +346,14 @@ report afterward. A report's claims can then be checked against it.
   (see above), and the `qr_code_data_uri` image too if the output format
   supports embedded images (e.g. an HTML/PDF export) -- if it doesn't
   (plain markdown/chat text), the URL alone is enough.
+- Pass `document_title` and `document_author` as two **separate**
+  arguments -- never concatenate an author/student name onto the title
+  string yourself (e.g. `"Some Title — Jane Doe"`). They are shown as
+  separate fields on the certificate and PDF, and `document_author` is
+  the only correct place for a person's name here; folding it into
+  `document_title` defeats the point of that field's own separate
+  identity, since `document_title` is always shown regardless of
+  anonymity settings.
 - Skip this step entirely if only the free structural checks were run --
   there is nothing to certify, and calling it would just return
   `no_verifications_to_certify`.
