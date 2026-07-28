@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.8"
+  version: "1.9"
 ---
 
 # CiteWatch citation audit workflow
@@ -241,9 +241,30 @@ malformed to identify (no title, no year, etc.) belong here first.
 
 Legend:
 - **[OK]** `matched: true`, no `metadata_checks` mismatches, not retracted, no journal-quality concern.
-- **[!!]** `matched: true` but a `metadata_checks` field (title/authors/year/venue) shows `mismatch`, or `match_confidence` is low, or journal quality is flagged as a concern.
+- **[!!]** `matched: true` but a `metadata_checks` field (title/authors/year/venue) shows `mismatch`, or `match_confidence` is low, or journal quality is flagged as a concern, or `match_method` is `"web_search"` (see below).
 - **[??]** `matched: false` -- genuinely unverifiable against open bibliographic data. This is **not** an accusation of fabrication -- say so explicitly, matching the header's methodology note.
+- **[GL]** `escalation.grey_literature` is present -- not an academic paper (a government report, industry white paper, standard, etc. with no index entry to match against), but the server captured its full text and wrote a summary directly from the cited source. Present `escalation.grey_literature.summary` here, and don't mark it "Unverifiable" -- it's a different, more informative status than a plain no-match.
 - **[XX]** Confirmed critical: `retraction.is_retracted: true`, or the reference-list entry itself is too malformed to identify (not a matching judgment call -- an observable fact about the entry as written).
+
+**Automatic web-search/scrape escalation.** The server automatically falls
+back to a paid web search/scrape when the free sources (Crossref/OpenAlex/
+PubMed/Unpaywall) can't resolve something on their own -- a missing
+abstract with a known link, grey literature, or no match at all. This is
+fully automatic; there is nothing you need to do differently to trigger
+it. It surfaces in the response as:
+- `match_method: "web_search"` -- matched, but only via an independent web
+  search, never corroborated against a structured bibliographic index.
+  Always treat as **[!!]**, never as a plain **[OK]**, regardless of
+  `match_confidence`.
+- `escalation.verification_note` -- a short explanation to carry into your
+  `Notes` column whenever present (e.g. why a web-search match should be
+  treated with extra caution, or that a second opinion corroborated an
+  originally medium-confidence match).
+- `escalation.grey_literature` -- see **[GL]** above.
+- `credits_charged` may include a small fractional amount on top of the
+  flat per-reference cost (e.g. `1.0072` instead of `1`) when one of these
+  steps fired. Just report the actual number returned -- nothing about
+  the insufficient-credits handling above changes.
 
 Table columns: `#`, `Entry` (as cited), `Status`, `Confidence` (from
 `match_confidence`, or "N/A" if unmatched), `Notes` (the specific
