@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "1.9"
+  version: "2.0"
 ---
 
 # CiteWatch citation audit workflow
@@ -219,18 +219,33 @@ require manual follow-up, not automatic suspicion.
 
 ### 1. Executive Summary
 
-A metrics table, computed from your actual tool results (not estimated):
+A metrics table, computed from your actual tool results (not estimated).
+Every row is a count **and its percentage of total bibliography entries
+audited** (e.g. `12 (11%)`), not a bare count -- this matters specifically
+for the non-academic/other-source rows below, since a report reader
+needs to immediately see what share of the whole bibliography those
+categories represent, not just an absolute number:
 
-| Metric | Count |
+| Metric | Count (% of total) |
 |---|---|
 | Bibliography entries audited | total reference_entries |
-| Verified, high/moderate confidence | `matched: true` with `match_confidence` high or moderate |
+| Verified, high/moderate confidence | `matched: true` with `match_confidence` high or moderate, excluding `match_method: "web_search"` |
 | Verified, low confidence | `matched: true` with `match_confidence` low |
-| Unverifiable (no match found) | `matched: false` |
+| Verified via web search only (not index-corroborated) | `match_method: "web_search"` -- see below |
+| Grey literature / non-academic source | `escalation.grey_literature` present -- see **[GL]** below |
+| Unverifiable (no match found) | `matched: false` and no `escalation.grey_literature` |
 | Retracted | `retraction.is_retracted: true` |
 | In-text citations missing from bibliography | `orphaned_citations` count |
 | Reference entries never cited | `unused_references` count |
 | Not checked (credit limit / scope decision) | explicit count, never omitted |
+
+The "Verified via web search only" and "Grey literature / non-academic
+source" rows exist so a reader can see at a glance how much of the
+bibliography rests on a weaker or different kind of verification than a
+direct bibliographic-index match -- never fold these into the plain
+"Verified"/"Unverifiable" counts above them, and never omit them even
+when their count is zero (write `0 (0%)` explicitly, same discipline as
+"Not checked").
 
 Follow with a short **Critical Issues** list (numbered, most severe
 first) -- confirmed retractions, foundational/heavily-cited sources that
