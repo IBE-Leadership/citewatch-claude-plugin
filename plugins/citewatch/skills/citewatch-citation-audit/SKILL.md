@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.4"
+  version: "2.5"
 ---
 
 # CiteWatch citation audit workflow
@@ -139,6 +139,143 @@ occurred to you.
 
 ## 2. Locate the reference list reliably, and track long documents as you go
 
+### The mandatory procedure: eat the elephant one bite at a time
+
+Never treat a manuscript as one undifferentiated pass -- extract
+everything, then verify everything, then report. That's exactly how
+entries get dropped, merged, or silently skipped on anything longer than
+a few pages. Follow these steps, in this order, every time:
+
+**Step A -- Size up the document before touching it.** Decide which of
+three cases you're in, and commit to the matching unit of work before
+extracting anything:
+
+1. **Large, with chapters** (a thesis, dissertation, or book-length
+   manuscript divided into numbered/titled chapters) -- the unit of work
+   is **one chapter at a time**.
+2. **Large, with sections but no chapters** (a long report or article
+   divided into major headed sections but not full chapters) -- the unit
+   of work is **one section at a time**.
+3. **Small, with no meaningful internal division** (a short paper, essay,
+   or report where reading it in one pass is genuinely manageable) -- the
+   unit of work is **the entire document**.
+
+Say out loud which case applies and why before extraction begins -- this
+decision drives everything that follows, so make it deliberately.
+
+**Step B -- Plan it before extracting anything.** Build an explicit,
+ordered todo list of the work: one item per unit from Step A (one per
+chapter, one per section, or a single item for an undivided small
+document), in document order, plus trailing items for this audit's
+remaining stages (free structural checks, certificate generation, final
+report). If a native todo/task-tracking tool is available in this
+environment, use it directly; otherwise write the plan as the opening
+section of the tracking file described below. Mark a unit's item
+complete only once every citation inside it has gone all the way through
+Step C below -- never mark one done partway through, and never jump
+ahead to a later unit out of order. This is what turns a 100+ reference,
+multi-chapter audit into a visible, resumable checklist instead of an
+implicit mental model that's easy to lose track of -- especially
+important since a long audit can span more turns than comfortably fit in
+one context window, or cross a session boundary.
+
+Alongside the unit todo list, if the same reference is likely to recur
+across multiple chapters/sections (common in theses, edited volumes,
+compiled reports), also start a reference-tracking table now: one row
+per unique reference, with its reference string, a status field starting
+at "not yet checked", and a citing-locations list. Populate and update
+this table incrementally as you complete each unit in Step C below --
+**not** via a separate whole-document read done first. The first time you
+reach a given reference, verify it and record the result in this table;
+every later unit that cites the same reference reads the already-recorded
+result instead of calling the tool again -- never re-verify a reference
+just because it recurs later in the document, that spends credits on a
+call whose answer you already have. Keep orphaned/missing-from-bibliography
+candidates in their own clearly separate rows (or a separate file) from
+genuine bibliography rows in this same table -- both get sent to
+CiteWatch per Step C.5 below, but they must never be blended together
+when you build a bibliography tool-call payload, or in the report's own
+figures later.
+
+If you have file-write access in this environment, save and update both
+the todo list and the tracking table on disk as you go, rather than
+holding them only in the conversation.
+
+**Step C -- Work through one unit at a time, in document order.** For
+cases 1 and 2, process chapters/sections strictly in order, one at a
+time -- never skip ahead "to get a feel for the whole document" first,
+and never merge several chapters/sections into a single extraction pass.
+Within each unit, before marking its todo item complete and moving to the
+next:
+
+1. Read the unit fully (per step 1: never extract from a partial read).
+2. Extract every in-text citation in that unit, together with its
+   `claim_text` wherever the citation supports a specific finding,
+   statistic, or conclusion (see step 1's claim-text guidance above).
+3. For each citation extracted this way, look it up against the
+   document's reference list (see "Finding the reference list" below) to
+   find its full bibliographic entry.
+4. **If a matching reference-list entry is found**, pair the full
+   reference string with that citation's `claim_text` (if any) and add it
+   to this unit's `verify_manuscript_references` batch (or read the
+   already-recorded result from the tracking table if another unit
+   verified it first).
+5. **If no matching entry is found (an orphaned in-text citation)**, send
+   it to CiteWatch anyway, using whatever text the in-text citation
+   itself gives you (e.g. `"Smith, 2020"`) as the `reference_string` --
+   do not just note it locally and skip the server entirely. CiteWatch's
+   own database counts and tracks these attempts regardless of whether a
+   full reference existed to send; leaving them out means CiteWatch never
+   learns about them, and the audit's own record of what was attempted is
+   incomplete. This still costs 1 credit per attempt like any other
+   reference -- factor the manuscript's likely orphaned-citation count
+   into the budget check in step 4, not just the bibliography's own entry
+   count. Keep its result in the report's Orphan Citations section (step
+   6.3), never folded into the Full Verification Table or Executive
+   Summary counts that describe the bibliography itself -- it's a
+   different category of entry (there is no genuine reference-list
+   attribution to verify against), and blending the two would misstate
+   what fraction of the actual bibliography was checked.
+6. Only after every citation in the unit has gone through steps 3-5,
+   update the tracking table, mark the unit's todo item complete, and
+   move on to the next one.
+
+Case 3 (small, undivided documents) follows the same six sub-steps --
+there's simply one unit, the whole document, instead of many.
+
+By the last unit, the tracking table already holds every reference's full
+citing-location history and verification result -- build the Full
+Verification Table and Orphan Citations report sections directly from it
+rather than re-deriving them from memory.
+
+**On batch sizing** (independent of the unit-by-unit plan above): a
+single chapter or section can have anywhere from a handful to 100+
+references, so batch the actual `verify_manuscript_references` **calls**
+by size, not by unit boundary -- send **~10 references per call**
+(smaller, ~5, if you're also sending `claim_text` for most entries in the
+batch -- the automatic claim-vs-abstract check adds a real extra step per
+reference, so a batch that size takes meaningfully longer than the same
+size did before that feature existed), not a single huge call for an
+entire chapter or the whole bibliography (a very large batch can run
+several minutes, especially if several references need the automatic
+web-search/scrape escalation or claim check, and a long-running single
+call has more that can interrupt it along the way). If a batch call
+errors out or the connection drops partway through, just call it again
+with the same batch (or continue with the remaining references) -- the
+server detects anything already verified and not yet certified and
+returns it for free (`resumed_from_earlier_call: true`) instead of
+redoing the work and charging twice, so retrying is always safe.
+
+Batches don't have to be sent one at a time, either -- if your
+environment lets you make multiple tool calls concurrently, you can fire
+several `verify_manuscript_references` batches in parallel to cut the
+audit's total wall-clock time, rather than waiting for each batch to
+finish before starting the next. The server handles this safely: if two
+concurrent calls ever verify the exact same reference at once, a
+database-level check on its side means only one is actually recorded and
+charged, and the other automatically gets refunded and reflects that same
+result instead of creating a conflicting duplicate.
+
 ### Finding the reference list
 
 Don't search for a single heading text and stop. Reference lists appear
@@ -157,77 +294,6 @@ end, or a separate reference list per chapter/section** (common in
 theses, edited volumes, and compiled reports). Skimming only the very
 end of the document will miss per-chapter lists entirely. Confirm which
 structure you're dealing with before extraction, not after.
-
-### Large or multi-chapter documents: work from a persistent tracking file
-
-For a document long enough that holding the full state in conversation
-context risks losing track of what's been verified (many chapters, a
-large reference list, or a per-chapter reference-list structure), don't
-try to carry all of it in memory across the whole audit. Instead:
-
-1. Before calling any verification tool, make one full pass across the
-   *entire* document (every chapter/section) to build a single merged
-   reference list -- combine per-chapter lists into one set, and for
-   every unique reference, record **every** chapter/section and
-   page (or best available location) where it's cited in-text. The same
-   title/author/year appearing in two different chapters is one
-   reference cited twice, not two references -- merge it, don't verify
-   it twice.
-2. Write this out as a working data file (e.g. a JSON or Markdown table)
-   before verifying anything -- one row per unique reference, with the
-   reference string, every citing location, and a status field starting
-   at "not yet checked". Keep orphaned/missing-from-bibliography
-   candidates (in-text citations with no matching reference-list entry)
-   in a clearly separate field or file from this table -- never merge
-   them in, even temporarily, per the extraction-integrity note in step 1
-   above; a tool call built from this file must only ever draw from the
-   genuine-bibliography rows. If you have file-write access in this
-   environment, save and update this file on disk as you go rather than
-   holding it only in the conversation -- a long audit can span more
-   turns than comfortably fit in one context window, or cross a session
-   boundary, and a saved file lets you resume exactly where you left off
-   instead of re-deriving progress or silently re-scanning chapters
-   you've already covered.
-3. Verify chapter by chapter against this file for *bookkeeping*: the
-   first time you reach a given reference, verify it and mark the file's
-   status field with the result; every later chapter that cites the same
-   reference reads the already-recorded result instead of calling the
-   tool again. Never re-verify a reference just because it recurs later
-   in the document -- that spends credits on a call whose answer you
-   already have.
-
-   Chapter boundaries are about bookkeeping, not the right unit for the
-   actual `verify_manuscript_references` **call size** -- a single
-   chapter can have anywhere from a handful to 100+ references. Batch the
-   *tool calls* independently of chapter structure: send **~10 references
-   per `verify_manuscript_references` call** (smaller, ~5, if you're also
-   sending `claim_text` for most entries in the batch -- the automatic
-   claim-vs-abstract check adds a real extra step per reference, so a
-   batch that size takes meaningfully longer than the same size did
-   before that feature existed), not a single huge call for the whole
-   bibliography (a very large batch can run several minutes, especially
-   if several references need the automatic web-search/scrape escalation
-   or claim check, and a long-running single call has more that can
-   interrupt it along the way). If a batch call errors out or the
-   connection drops partway through, just call it again with the same
-   batch (or continue with the remaining references) -- the server
-   detects anything already verified and not yet certified and returns
-   it for free (`resumed_from_earlier_call: true`) instead of redoing the
-   work and charging twice, so retrying is always safe.
-
-   Batches don't have to be sent one at a time, either -- if your
-   environment lets you make multiple tool calls concurrently, you can
-   fire several `verify_manuscript_references` batches in parallel to cut
-   the audit's total wall-clock time, rather than waiting for each batch
-   to finish before starting the next. The server handles this safely: if
-   two concurrent calls ever verify the exact same reference at once, a
-   database-level check on its side means only one is actually recorded
-   and charged, and the other automatically gets refunded and reflects
-   that same result instead of creating a conflicting duplicate.
-4. By the last chapter, the tracking file already holds every
-   reference's full citing-location history and verification result --
-   build the Full Verification Table and Orphan Citations sections
-   directly from it rather than re-deriving them from memory.
 
 ## 3. Run the free checks first, and treat their output as leads, not verdicts
 
@@ -256,7 +322,13 @@ credits per call -- meaningfully more than a single reference
 verification, so factor that in when estimating whether a balance covers
 a planned sequence of calls, not just a flat per-tool-call count. Call
 `get_credit_balance` (free) before committing to a full-manuscript
-verification pass. If the reference count exceeds the available balance,
+verification pass. Estimate the reference count from the *whole*
+document, not just the bibliography: per step 2's mandatory procedure,
+every orphaned in-text citation also gets sent to CiteWatch and costs 1
+credit, same as a genuine bibliography entry -- a manuscript with a messy
+or incomplete reference list can easily have meaningfully more orphaned
+citations than usual, so don't estimate off the bibliography's entry
+count alone. If the reference count exceeds the available balance,
 stop and ask the user how to proceed rather than silently deciding for
 them -- for example:
 
@@ -412,6 +484,17 @@ in substance: these are candidates for the user to check against their
 own document, not confirmed gaps. Flag foundational/theory-defining
 sources specifically if orphaned -- an examiner or reviewer notices
 those fastest.
+
+Per step 2's mandatory procedure, each orphaned citation was also sent to
+CiteWatch on its own (using the bare in-text citation as `reference_string`,
+since no bibliography entry existed to send instead) -- report that
+result here too, next to the citation itself (e.g. "CiteWatch attempted
+an independent bibliographic search on this citation alone and found no
+match" or, on the rare occasion the bare citation is enough to resolve,
+whatever it did find). Never fold these results into the Full
+Verification Table or Executive Summary counts above -- they describe a
+different thing (no genuine reference-list attribution exists to verify
+against) and belong only in this section.
 
 ### 4. Contextual Misuse Flags
 
