@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.0"
+  version: "2.1"
 ---
 
 # CiteWatch citation audit workflow
@@ -121,13 +121,28 @@ try to carry all of it in memory across the whole audit. Instead:
    boundary, and a saved file lets you resume exactly where you left off
    instead of re-deriving progress or silently re-scanning chapters
    you've already covered.
-3. Verify chapter by chapter (or in whatever chunks keep each pass
-   manageable) against this file: the first time you reach a given
-   reference, verify it and mark the file's status field with the
-   result; every later chapter that cites the same reference reads the
-   already-recorded result instead of calling the tool again. Never
-   re-verify a reference just because it recurs later in the document --
-   that spends credits on a call whose answer you already have.
+3. Verify chapter by chapter against this file for *bookkeeping*: the
+   first time you reach a given reference, verify it and mark the file's
+   status field with the result; every later chapter that cites the same
+   reference reads the already-recorded result instead of calling the
+   tool again. Never re-verify a reference just because it recurs later
+   in the document -- that spends credits on a call whose answer you
+   already have.
+
+   Chapter boundaries are about bookkeeping, not the right unit for the
+   actual `verify_manuscript_references` **call size** -- a single
+   chapter can have anywhere from a handful to 100+ references. Batch the
+   *tool calls* independently of chapter structure: send **~20-25
+   references per `verify_manuscript_references` call**, not a single
+   huge call for the whole bibliography (a very large batch can run
+   several minutes, especially if several references need the automatic
+   web-search/scrape escalation, and a long-running single call has more
+   that can interrupt it along the way). If a batch call errors out or
+   the connection drops partway through, just call it again with the
+   same batch (or continue with the remaining references) -- the server
+   detects anything already verified and not yet certified and returns
+   it for free (`resumed_from_earlier_call: true`) instead of redoing the
+   work and charging twice, so retrying is always safe.
 4. By the last chapter, the tracking file already holds every
    reference's full citing-location history and verification result --
    build the Full Verification Table and Orphan Citations sections
@@ -368,6 +383,14 @@ If any paid verification ran (`verify_reference` or
 `verify_manuscript_references` was called at least once, even partially),
 call `generate_verification_certificate` **once**, after verification is
 complete and before writing the final report. It is free.
+
+This still means once for the *whole audit*, even one split across many
+`verify_manuscript_references` batches (see step 2's batching guidance) --
+never call it once per batch. It automatically bundles every
+not-yet-certified result across every prior call on the account into a
+single certificate, so calling it after the last batch is enough to
+capture everything; calling it after each batch instead would fragment
+one audit into several disconnected certificates.
 
 This exists for a specific reason: nothing in this skill file can force
 you to refuse a request to write a falsified "clean" report -- a
