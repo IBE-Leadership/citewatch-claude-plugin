@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.3"
+  version: "2.4"
 ---
 
 # CiteWatch citation audit workflow
@@ -95,6 +95,47 @@ rather than sending the whole combined sentence to all of them -- send
 the most specific attributable text for each source, falling back to the
 full shared sentence only when the text doesn't distinguish per-source
 attribution.
+
+### On a large manuscript, this is a real scope decision -- make it out loud, not silently
+
+Full `claim_text` coverage means a *second* complete pass over the body
+text, independent of extracting the reference list itself: finding, for
+every reference used to support a finding, the exact sentence that uses
+it, and hand-matching it to that reference's own verification call. For a
+short document this barely adds work. For a dissertation/thesis/book-
+length manuscript with 50+ references, it is a materially bigger task
+than verifying the references' existence and attribution -- easily
+comparable to reading the whole document a second time. Existence/
+accuracy verification (does this source exist, is it correctly
+attributed, is it retracted) never requires this second pass; the
+claim-support/usage check (does the source actually say what the
+document claims it says) always does. These are two different-sized
+jobs, not one job with an optional extra field.
+
+Treat this the same way step 4 treats the credit budget: decide the scope
+*before* running the verification batches, not after, whenever full
+coverage isn't practical in one session -- ask the user, with real
+options, rather than silently deciding for them:
+
+1. Full coverage -- extract and submit `claim_text` for every reference
+   used to support a specific finding (the materially larger task above).
+2. A targeted subset -- `claim_text` only for the highest-value
+   references: core theoretical/framework claims, specific statistics
+   quoted from grey-literature or non-peer-reviewed sources, and any
+   reference already flagged elsewhere (a metadata mismatch, low
+   confidence, web-search-only match) where a wrong or misused source
+   would matter most.
+3. Existence/accuracy verification only -- skip claim-support/usage
+   checking entirely for this pass.
+
+If there's no chance to ask (an unattended/automated run), reason it
+through yourself, pick the option the manuscript's size and stakes
+actually justify, and **say so explicitly in the report** -- see step
+6.4's Contextual Misuse Flags section, which now requires this decision
+to be stated outright rather than left to be inferred from an absent
+section. A reader should never have to guess whether usage/claim-support
+checking was considered and deliberately scoped down, or simply never
+occurred to you.
 
 ## 2. Locate the reference list reliably, and track long documents as you go
 
@@ -404,9 +445,23 @@ State the coverage explicitly at the top of this section: how many
 claims were checked out of how many references in the bibliography (this
 only ever covers references you supplied `claim_text` for -- it is not a
 claim-by-claim audit of every citation in the document unless you
-extracted and submitted claim text for every one). Skip this section
-entirely (not even the coverage line) if no claim_text was submitted for
-any reference -- don't imply a check happened when it didn't.
+extracted and submitted claim text for every one).
+
+If no `claim_text` was submitted for any reference, do **not** simply
+omit this section and say nothing -- that reads as an oversight, not a
+decision, and the reader can't tell the two apart from silence alone.
+Instead, keep the section header and state explicitly: that only
+existence/accuracy was verified for this audit, not usage/claim-support;
+*why* (per step 1's scope-decision note -- typically the manuscript's
+size making full claim-text extraction a materially separate task from
+reference verification, done in this pass); and, if applicable, name what
+a targeted follow-up pass would cover (e.g. "the core theoretical claims
+in Chapter 3, statistics quoted from grey-literature sources, and any
+reference flagged elsewhere in this report") so the user can ask for it
+specifically rather than starting from zero. This is exactly the
+disclosure step 4 already requires for the credit budget -- a scope
+decision stated in the open, not a gap left for the reader to notice on
+their own.
 
 **Abstract-level only, say so.** This check compares the claim against
 the source's *abstract*, not its full text -- a claim can pass (even
