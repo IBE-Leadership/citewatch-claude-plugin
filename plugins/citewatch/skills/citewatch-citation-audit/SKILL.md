@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.7"
+  version: "2.8"
 ---
 
 # CiteWatch citation audit workflow
@@ -255,6 +255,35 @@ By the last unit, the tracking table already holds every reference's full
 citing-location history and verification result -- build the Full
 Verification Table and Orphan Citations report sections directly from it
 rather than re-deriving them from memory.
+
+**Reconcile the found/orphaned judgment before generating the certificate.**
+Step 5 above has you decide found-vs-orphaned per citation in real time,
+one at a time, as you walk through each unit -- a necessary shortcut so
+you can batch-verify incrementally instead of waiting for the entire
+document to be read first, but it's still just your own ad hoc comparison,
+made without the complete in-text-citation and reference-list side by
+side. `check_citation_reference_balance` (step 3) is the tool built to do
+this same comparison more carefully, once every unit's citations and the
+full reference list have actually been extracted -- nothing above ties
+the two together automatically, so do it explicitly: once you've reached
+the end of the document (the last unit on your todo list), call
+`check_citation_reference_balance` with the complete accumulated
+`in_text_citations` and `reference_entries` lists, before generating the
+certificate, and reconcile its `orphaned_citations` output against what
+you actually submitted with `is_orphaned_citation: true` during the walk:
+
+- If it lists additional orphaned citations you never submitted at all
+  (missed during the walk -- easy to happen in an early chapter, or if a
+  reference-list lookup was rushed), submit those now with
+  `is_orphaned_citation: true` before generating the certificate. The
+  certificate must reflect every orphaned citation the free check
+  independently confirms, not just the ones caught in real time.
+- If something you submitted as orphaned is absent from its
+  `orphaned_citations` list (i.e. it found a plausible reference-list
+  match your real-time lookup missed), don't silently trust either
+  judgment -- note the discrepancy in the report's Orphan Citations
+  section as a possible extraction inconsistency worth the user's own
+  check, per that tool's own `extraction_disclaimer`.
 
 **On batch sizing** (independent of the unit-by-unit plan above): a
 single chapter or section can have anywhere from a handful to 100+
