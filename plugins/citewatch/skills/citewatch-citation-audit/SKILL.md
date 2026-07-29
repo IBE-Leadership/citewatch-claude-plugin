@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.13"
+  version: "2.14"
 ---
 
 # CiteWatch citation audit workflow
@@ -178,6 +178,25 @@ Never treat a manuscript as one undifferentiated pass -- extract
 everything, then verify everything, then report. That's exactly how
 entries get dropped, merged, or silently skipped on anything longer than
 a few pages. Follow these steps, in this order, every time:
+
+### Capture `audit_session_id` from your very first verify call, then reuse it for the whole audit
+
+The first `verify_reference`/`verify_manuscript_references` call of this
+audit won't have one yet -- omit it, and the server generates one,
+returned as `audit_session_id` in that response (top-level for
+`verify_manuscript_references`, alongside the other fields for
+`verify_reference`). Record it (in the tracking file, if you have one)
+and pass that exact same value as `audit_session_id` on every later call
+for this same audit -- every batch, every retry, every resumed call --
+right through to `generate_verification_certificate` at the end.
+
+This exists because CiteWatch's certificate used to sweep up "everything
+uncertified on the account" with no way to tell one audit's results apart
+from another's -- confirmed live to actually mix an unrelated call into a
+real certificate. Forgetting to propagate the id isn't silently dangerous
+any more (each call would just start its own session, visible immediately
+as a low `entries_included` count when you generate the certificate), but
+getting it right the first time avoids that friction entirely.
 
 **Step A -- Size up the document before touching it.** Decide which of
 three cases you're in, and commit to the matching unit of work before
@@ -838,11 +857,17 @@ complete and before writing the final report. It is free.
 
 This still means once for the *whole audit*, even one split across many
 `verify_manuscript_references` batches (see step 2's batching guidance) --
-never call it once per batch. It automatically bundles every
-not-yet-certified result across every prior call on the account into a
-single certificate, so calling it after the last batch is enough to
-capture everything; calling it after each batch instead would fragment
-one audit into several disconnected certificates.
+never call it once per batch. Pass the same `audit_session_id` you've
+been using throughout this audit (see step 2) -- it bundles every
+not-yet-certified result tagged with THAT session into a single
+certificate, so calling it after the last batch is enough to capture
+everything; calling it after each batch instead would fragment one audit
+into several disconnected certificates. If you somehow lost track of the
+session id, omitting it works too as long as nothing else has touched
+this account's uncertified results in the meantime -- the server uses
+the one unambiguous session it finds; if it finds more than one, it
+rejects the call and lists them rather than guessing, so pass the right
+one explicitly.
 
 The certificate page/PDF already includes a bar chart of verification
 outcomes, a plain-English interpretation paragraph, and an overall
