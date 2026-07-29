@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.9"
+  version: "2.10"
 ---
 
 # CiteWatch citation audit workflow
@@ -186,16 +186,31 @@ per unique reference, with its reference string, a status field starting
 at "not yet checked", and a citing-locations list. Populate and update
 this table incrementally as you complete each unit in Step C below --
 **not** via a separate whole-document read done first. The first time you
-reach a given reference, verify it and record the result in this table;
-every later unit that cites the same reference reads the already-recorded
-result instead of calling the tool again -- never re-verify a reference
-just because it recurs later in the document, that spends credits on a
-call whose answer you already have. Keep orphaned/missing-from-bibliography
-candidates in their own clearly separate rows (or a separate file) from
-genuine bibliography rows in this same table -- both get sent to
-CiteWatch per Step C.5 below, but they must never be blended together
-when you build a bibliography tool-call payload, or in the report's own
-figures later.
+reach a given reference, verify it and record the result in this table.
+A later unit that cites the same reference again should normally just
+reuse that recorded result instead of calling the tool again -- never
+re-verify a reference just because it recurs later in the document, that
+spends credits on a call whose answer you already have.
+
+**Exception: a later citation with its own new claim.** If THIS later
+citation attributes a specific finding, statistic, or conclusion
+(`claim_text`) that the first call never had -- the common case where a
+reference gets a bare mention early on and a substantive claim only later
+-- call `verify_reference`/`verify_manuscript_references` again with the
+same reference string and this new `claim_text`. The server recognizes
+it's the same reference, does **not** re-charge the base per-reference
+credit, and runs the claim-vs-abstract check fresh against the abstract
+already on file (a small extra charge only for that check, same as a
+first-time check) -- update this table's row with the new `claim_support`
+result. Only skip the call when the recurring citation has no claim_text
+of its own, or repeats a claim already checked on an earlier call for the
+same reference.
+
+Keep orphaned/missing-from-bibliography candidates in their own clearly
+separate rows (or a separate file) from genuine bibliography rows in this
+same table -- both get sent to CiteWatch per Step C.5 below, but they
+must never be blended together when you build a bibliography tool-call
+payload, or in the report's own figures later.
 
 If you have file-write access in this environment, save and update both
 the todo list and the tracking table on disk as you go, rather than
@@ -217,9 +232,12 @@ next:
    find its full bibliographic entry.
 4. **If a matching reference-list entry is found**, pair the full
    reference string with that citation's `claim_text` (if any) and add it
-   to this unit's `verify_manuscript_references` batch (or read the
-   already-recorded result from the tracking table if another unit
-   verified it first).
+   to this unit's `verify_manuscript_references` batch -- or, if the
+   tracking table already has a recorded result from an earlier unit,
+   either reuse that result unchanged (nothing new to check) or submit a
+   follow-up call with just this citation's new `claim_text` per Step B's
+   exception above (safe, no duplicate base charge, runs the claim check
+   fresh).
 5. **If no matching entry is found (an orphaned in-text citation)**, send
    it to CiteWatch anyway, using whatever text the in-text citation
    itself gives you (e.g. `"Smith, 2020"`) as the `reference_string`,
