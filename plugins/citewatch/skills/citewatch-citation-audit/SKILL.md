@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.11"
+  version: "2.12"
 ---
 
 # CiteWatch citation audit workflow
@@ -112,30 +112,62 @@ claim-support/usage check (does the source actually say what the
 document claims it says) always does. These are two different-sized
 jobs, not one job with an optional extra field.
 
-Treat this the same way step 4 treats the credit budget: decide the scope
-*before* running the verification batches, not after, whenever full
-coverage isn't practical in one session -- ask the user, with real
-options, rather than silently deciding for them:
+### Always ask the user, before running any paid verification -- this is not your call to make
 
-1. Full coverage -- extract and submit `claim_text` for every reference
-   used to support a specific finding (the materially larger task above).
-2. A targeted subset -- `claim_text` only for the highest-value
-   references: core theoretical/framework claims, specific statistics
-   quoted from grey-literature or non-peer-reviewed sources, and any
-   reference already flagged elsewhere (a metadata mismatch, low
-   confidence, web-search-only match) where a wrong or misused source
-   would matter most.
-3. Existence/accuracy verification only -- skip claim-support/usage
-   checking entirely for this pass.
+Ask this, verbatim in substance, before the first `verify_reference`/
+`verify_manuscript_references` call of the audit -- not after, not only
+when the manuscript happens to be large, and not as a decision you reason
+through yourself when there's "a chance to ask":
 
-If there's no chance to ask (an unattended/automated run), reason it
-through yourself, pick the option the manuscript's size and stakes
-actually justify, and **say so explicitly in the report** -- see step
-6.5's Contextual Misuse Flags section, which now requires this decision
-to be stated outright rather than left to be inferred from an absent
-section. A reader should never have to guess whether usage/claim-support
-checking was considered and deliberately scoped down, or simply never
-occurred to you.
+1. Check claims against abstracts for accuracy (full coverage).
+2. Check only a random sample of claims for accuracy.
+3. Check only suspicious claims for accuracy (references already flagged
+   elsewhere -- a metadata mismatch, low confidence, or a web-search-only
+   match).
+4. Check no claims against abstracts (existence/accuracy verification
+   only).
+
+**If the user doesn't answer, the default is always option 1 (full
+coverage)** -- never option 3 or 4, and never something you pick for
+them because the document is large. Full coverage is a genuinely bigger
+task (see below), but "the user didn't respond" must never quietly become
+"so I'll do the cheap thing" -- that's the exact failure this skill has
+hit repeatedly: an unstated scope decision the user never actually agreed
+to.
+
+Whichever option applies, pass it to `generate_verification_certificate`'s
+`claim_check_scope` argument at the end (`"full"`, `"random_sample"`,
+`"suspicious_only"`, or `"none"`) -- this is a required, validated field
+(defaults to `"full"` server-side too, matching the rule above), not
+optional, and it's cross-checked against the certificate's own
+server-computed count of eligible-but-unchecked references. Claiming
+`"full"` while that count is nonzero gets flagged as a discrepancy on the
+certificate itself.
+
+Why this is a real decision worth asking about, not a formality: full
+`claim_text` coverage means a *second* complete pass over the body text,
+independent of extracting the reference list itself: finding, for every
+reference used to support a finding, the exact sentence that uses it, and
+hand-matching it to that reference's own verification call. For a short
+document this barely adds work. For a dissertation/thesis/book-length
+manuscript with 50+ references, it is a materially bigger task than
+verifying the references' existence and attribution -- easily comparable
+to reading the whole document a second time. Existence/accuracy
+verification (does this source exist, is it correctly attributed, is it
+retracted) never requires this second pass; the claim-support/usage check
+(does the source actually say what the document claims it says) always
+does. These are two different-sized jobs, not one job with an optional
+extra field -- which is exactly why the user, not you, should be the one
+deciding whether to pay for the bigger job.
+
+If there's genuinely no chance to ask (an unattended/automated run with
+no user to respond), the default from above still applies: proceed as if
+option 1 was chosen, and **say so explicitly in the report** -- see step
+6.5's Contextual Misuse Flags section, which requires this decision to be
+stated outright rather than left to be inferred from an absent section.
+A reader should never have to guess whether usage/claim-support checking
+was considered and deliberately scoped down, or simply never occurred to
+you.
 
 ## 2. Locate the reference list reliably, and track long documents as you go
 
@@ -819,37 +851,46 @@ write agrees with what the linked certificate shows (same counts, same
 orphaned/duplicate/unverifiable-claim entries), since a reader will
 naturally check the two against each other.
 
-### `claim_coverage_note` is required -- this is not optional or skippable
+### `claim_coverage_note` and `claim_check_scope` are required -- not optional or skippable
 
-Pass `claim_coverage_note` on this call: a plain-English statement of what
-fraction of eligible references (matched, with an abstract available) got
-a claim-vs-abstract check, and why. The call is rejected (no charge --
-just call again with the note) if this is missing or blank. This exists
-because a chat reply explaining a scope decision isn't good enough on its
-own -- a user (or a supervisor reading the certificate later) may never
-see that reply, and this project has already seen a real case where the
-chat's own account of what it checked didn't match what actually
-happened. The note becomes a permanent, prominently-displayed section of
-the certificate itself, so the scope decision is on record regardless of
-what else gets said in chat.
+Pass both on this call:
+- `claim_check_scope`: exactly which of step 1's four options applies --
+  `"full"`, `"random_sample"`, `"suspicious_only"`, or `"none"`. This must
+  match whichever option the user actually chose (or the default they got
+  because they didn't answer) -- not a value you pick after the fact to
+  match how much you happened to check. Anything outside those four
+  values is rejected.
+- `claim_coverage_note`: a plain-English statement of *what* was checked
+  and why, specific to that scope -- see examples below. The call is
+  rejected (no charge -- just call again) if this is missing or blank.
 
-State it honestly and specifically, using step 1's scope-decision
-framing:
-- Full coverage: "Every reference used to support a specific finding,
+This exists because a chat reply explaining a scope decision isn't good
+enough on its own -- a user (or a supervisor reading the certificate
+later) may never see that reply, and this project has already seen a real
+case where the chat's own account of what it checked didn't match what
+actually happened. Both fields become a permanent, prominently-displayed
+section of the certificate itself, so the scope decision is on record
+regardless of what else gets said in chat.
+
+State the note honestly and specifically, matching whichever
+`claim_check_scope` applies:
+- `"full"`: "Every reference used to support a specific finding,
   statistic, or conclusion was checked" (only true if you actually did
   this for every one -- don't claim it if you didn't).
-- A targeted subset: name which references and why, e.g. "Checked 5 of
-  114 references -- the core theoretical framework and the most-quoted
-  statistics -- because full claim-text extraction on a 114-reference
-  thesis is a materially separate task from existence/accuracy
-  verification (see step 1)."
-- Skipped entirely: "This pass only verified existence/accuracy, not
-  claim usage."
+- `"random_sample"`: name the sample size, e.g. "20 of 114 references
+  were randomly selected for a claim-vs-abstract check."
+- `"suspicious_only"`: name which flagged references, e.g. "Checked the
+  12 references already flagged for a metadata mismatch, low-confidence
+  match, or web-search-only resolution."
+- `"none"`: "This pass only verified existence/accuracy, not claim
+  usage."
 
 The certificate also shows its own server-computed number next to this --
 how many matched references had a usable abstract but never got a
-`claim_text` submitted at all -- so your note can be checked against an
-objective count, not just taken on its own word.
+`claim_text` submitted at all -- so the note can be checked against an
+objective count, not just taken on its own word. Claiming `"full"` while
+that count is nonzero is flagged as a discrepancy directly on the
+certificate.
 
 This exists for a specific reason: nothing in this skill file can force
 you to refuse a request to write a falsified "clean" report -- a
