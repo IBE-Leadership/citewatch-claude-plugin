@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.10"
+  version: "2.11"
 ---
 
 # CiteWatch citation audit workflow
@@ -818,6 +818,38 @@ you don't need to reproduce these yourself, just make sure the report you
 write agrees with what the linked certificate shows (same counts, same
 orphaned/duplicate/unverifiable-claim entries), since a reader will
 naturally check the two against each other.
+
+### `claim_coverage_note` is required -- this is not optional or skippable
+
+Pass `claim_coverage_note` on this call: a plain-English statement of what
+fraction of eligible references (matched, with an abstract available) got
+a claim-vs-abstract check, and why. The call is rejected (no charge --
+just call again with the note) if this is missing or blank. This exists
+because a chat reply explaining a scope decision isn't good enough on its
+own -- a user (or a supervisor reading the certificate later) may never
+see that reply, and this project has already seen a real case where the
+chat's own account of what it checked didn't match what actually
+happened. The note becomes a permanent, prominently-displayed section of
+the certificate itself, so the scope decision is on record regardless of
+what else gets said in chat.
+
+State it honestly and specifically, using step 1's scope-decision
+framing:
+- Full coverage: "Every reference used to support a specific finding,
+  statistic, or conclusion was checked" (only true if you actually did
+  this for every one -- don't claim it if you didn't).
+- A targeted subset: name which references and why, e.g. "Checked 5 of
+  114 references -- the core theoretical framework and the most-quoted
+  statistics -- because full claim-text extraction on a 114-reference
+  thesis is a materially separate task from existence/accuracy
+  verification (see step 1)."
+- Skipped entirely: "This pass only verified existence/accuracy, not
+  claim usage."
+
+The certificate also shows its own server-computed number next to this --
+how many matched references had a usable abstract but never got a
+`claim_text` submitted at all -- so your note can be checked against an
+objective count, not just taken on its own word.
 
 This exists for a specific reason: nothing in this skill file can force
 you to refuse a request to write a falsified "clean" report -- a
