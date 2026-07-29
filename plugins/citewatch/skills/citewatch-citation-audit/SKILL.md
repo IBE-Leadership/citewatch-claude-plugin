@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.12"
+  version: "2.13"
 ---
 
 # CiteWatch citation audit workflow
@@ -139,10 +139,11 @@ Whichever option applies, pass it to `generate_verification_certificate`'s
 `claim_check_scope` argument at the end (`"full"`, `"random_sample"`,
 `"suspicious_only"`, or `"none"`) -- this is a required, validated field
 (defaults to `"full"` server-side too, matching the rule above), not
-optional, and it's cross-checked against the certificate's own
-server-computed count of eligible-but-unchecked references. Claiming
-`"full"` while that count is nonzero gets flagged as a discrepancy on the
-certificate itself.
+optional. The certificate also shows its own server-computed count of
+matched, abstract-available references that never got a claim check, as
+neutral context next to your note -- this is normal even under `"full"`
+scope (bare-mention and methods citations never need a claim check), not
+evidence something was missed.
 
 Why this is a real decision worth asking about, not a formality: full
 `claim_text` coverage means a *second* complete pass over the body text,
@@ -887,10 +888,13 @@ State the note honestly and specifically, matching whichever
 
 The certificate also shows its own server-computed number next to this --
 how many matched references had a usable abstract but never got a
-`claim_text` submitted at all -- so the note can be checked against an
-objective count, not just taken on its own word. Claiming `"full"` while
-that count is nonzero is flagged as a discrepancy directly on the
-certificate.
+`claim_text` submitted at all -- as neutral context, not an accusation.
+A nonzero count here is expected and normal even under `"full"` scope:
+bare-mention and methods citations (Creswell, Saunders, etc.) never need
+a claim check in the first place, since there's no attributable finding
+to check them against -- "full coverage" only ever means every
+claim-bearing citation, never literally every reference. This count is
+not, by itself, evidence that anything was missed.
 
 This exists for a specific reason: nothing in this skill file can force
 you to refuse a request to write a falsified "clean" report -- a
