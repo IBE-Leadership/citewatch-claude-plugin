@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.6"
+  version: "2.7"
 ---
 
 # CiteWatch citation audit workflow
@@ -222,12 +222,20 @@ next:
    verified it first).
 5. **If no matching entry is found (an orphaned in-text citation)**, send
    it to CiteWatch anyway, using whatever text the in-text citation
-   itself gives you (e.g. `"Smith, 2020"`) as the `reference_string` --
-   do not just note it locally and skip the server entirely. CiteWatch's
-   own database counts and tracks these attempts regardless of whether a
-   full reference existed to send; leaving them out means CiteWatch never
-   learns about them, and the audit's own record of what was attempted is
-   incomplete. This still costs 1 credit per attempt like any other
+   itself gives you (e.g. `"Smith, 2020"`) as the `reference_string`,
+   **and set `is_orphaned_citation: true`** on that entry -- do not just
+   note it locally and skip the server entirely, and never omit this flag.
+   CiteWatch's own database counts and tracks these attempts regardless of
+   whether a full reference existed to send; leaving them out means
+   CiteWatch never learns about them, and the audit's own record of what
+   was attempted is incomplete. The flag matters specifically because the
+   server uses it to keep this entry out of the certificate's bibliography
+   table and statistics entirely (there is no genuine reference-list
+   attribution to verify completeness/accuracy against, so it would
+   misrepresent both the table and the numbers to include it there) --
+   omitting the flag makes an orphaned citation look like a real
+   bibliography entry on the certificate, exactly the confusion this flag
+   exists to prevent. This still costs 1 credit per attempt like any other
    reference -- factor the manuscript's likely orphaned-citation count
    into the budget check in step 4, not just the bibliography's own entry
    count. Keep its result in the report's Orphan Citations section (step
@@ -488,15 +496,21 @@ sources specifically if orphaned -- an examiner or reviewer notices
 those fastest.
 
 Per step 2's mandatory procedure, each orphaned citation was also sent to
-CiteWatch on its own (using the bare in-text citation as `reference_string`,
-since no bibliography entry existed to send instead) -- report that
-result here too, next to the citation itself (e.g. "CiteWatch attempted
-an independent bibliographic search on this citation alone and found no
-match" or, on the rare occasion the bare citation is enough to resolve,
-whatever it did find). Never fold these results into the Full
-Verification Table or Executive Summary counts above -- they describe a
-different thing (no genuine reference-list attribution exists to verify
-against) and belong only in this section.
+CiteWatch on its own (using the bare in-text citation as `reference_string`
+and `is_orphaned_citation: true`, since no bibliography entry existed to
+send instead) -- report that result here too, next to the citation itself
+(e.g. "CiteWatch attempted an independent bibliographic search on this
+citation alone and found no match" or, on the rare occasion the bare
+citation is enough to resolve, whatever it did find). Never fold these
+results into the Full Verification Table or Executive Summary counts
+above -- they describe a different thing (no genuine reference-list
+attribution exists to verify against) and belong only in this section.
+The certificate (step 7) already does this separation automatically --
+`is_orphaned_citation: true` keeps an entry out of its bibliography table
+and every bibliography statistic, showing it instead in the certificate's
+own "Orphaned In-Text Citations" section -- so this section of your
+report and that section of the certificate should agree; if they don't,
+that's a sign an entry was submitted without the flag by mistake.
 
 ### 4. Duplicate Reference Entries
 
@@ -546,6 +560,18 @@ second, independent check, not a replacement for your own reading --
 also flag anything you notice yourself that the automatic check didn't
 catch or that came back `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as
 you always could.
+
+Separately, list every entry where `claim_support.skipped_reason` is
+`"no_abstract_available"` or `"assessment_failed"` under its own
+"Claims Submitted But Unverifiable" subheading -- these had `claim_text`
+submitted (unlike the overwhelming majority, where
+`skipped_reason: "no_claim_text_submitted"` just means checking wasn't
+attempted) but genuinely could not be assessed, most often because no
+abstract exists for that source. Never present these as `SUPPORTED` or
+otherwise fold them into the flagged-claims list above -- they are a
+third, distinct state (attempted and inconclusive, not checked-and-clean
+and not checked-and-flagged), and a reader needs to be able to tell all
+three apart.
 
 State the coverage explicitly at the top of this section: how many
 claims were checked out of how many references in the bibliography (this
@@ -646,6 +672,14 @@ not-yet-certified result across every prior call on the account into a
 single certificate, so calling it after the last batch is enough to
 capture everything; calling it after each batch instead would fragment
 one audit into several disconnected certificates.
+
+The certificate page/PDF already includes a bar chart of verification
+outcomes, a plain-English interpretation paragraph, and an overall
+recommendation, generated automatically from the same underlying data --
+you don't need to reproduce these yourself, just make sure the report you
+write agrees with what the linked certificate shows (same counts, same
+orphaned/duplicate/unverifiable-claim entries), since a reader will
+naturally check the two against each other.
 
 This exists for a specific reason: nothing in this skill file can force
 you to refuse a request to write a falsified "clean" report -- a
