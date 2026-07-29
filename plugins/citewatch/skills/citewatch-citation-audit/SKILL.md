@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.8"
+  version: "2.9"
 ---
 
 # CiteWatch citation audit workflow
@@ -288,20 +288,76 @@ you actually submitted with `is_orphaned_citation: true` during the walk:
 **On batch sizing** (independent of the unit-by-unit plan above): a
 single chapter or section can have anywhere from a handful to 100+
 references, so batch the actual `verify_manuscript_references` **calls**
-by size, not by unit boundary -- send **~10 references per call**
-(smaller, ~5, if you're also sending `claim_text` for most entries in the
+by size, not by unit boundary -- send **~15-20 references per call**
+(smaller, ~10, if you're also sending `claim_text` for most entries in the
 batch -- the automatic claim-vs-abstract check adds a real extra step per
 reference, so a batch that size takes meaningfully longer than the same
 size did before that feature existed), not a single huge call for an
 entire chapter or the whole bibliography (a very large batch can run
 several minutes, especially if several references need the automatic
 web-search/scrape escalation or claim check, and a long-running single
-call has more that can interrupt it along the way). If a batch call
-errors out or the connection drops partway through, just call it again
-with the same batch (or continue with the remaining references) -- the
-server detects anything already verified and not yet certified and
-returns it for free (`resumed_from_earlier_call: true`) instead of
-redoing the work and charging twice, so retrying is always safe.
+call has more that can interrupt it along the way). These are larger
+numbers than earlier guidance gave, on purpose -- see "Responses are
+compact by default" below: only references that actually have something
+wrong return full detail, so a typical batch's response size no longer
+scales anywhere near as fast with batch size as it used to; the limiting
+factor is now wall-clock time and how many entries in a given batch turn
+out flagged, not response size on its own. If a batch call errors out or
+the connection drops partway through, just call it again with the same
+batch (or continue with the remaining references) -- the server detects
+anything already verified and not yet certified and returns it for free
+(`resumed_from_earlier_call: true`) instead of redoing the work and
+charging twice, so retrying is always safe.
+
+### Responses are compact by default -- read `flags`, not raw fields
+
+`verify_reference`/`verify_manuscript_references` used to return every
+field for every reference -- full abstract text, a complete per-field
+metadata comparison, the works -- regardless of whether anything was
+actually wrong with that reference. Confirmed live: this is exactly what
+forced a real audit's calling model to artificially ration how many
+references it verified in one session, not a credit limit -- a clean
+reference's full abstract text alone was measured at ~4,300 of ~6,300
+response characters (68%) for one real reference, with **no use at all**
+under this skill's own instructions when `claim_text` wasn't submitted
+for it. That's now fixed at the source: **a reference with nothing wrong
+returns only what's needed to write one clean report line.**
+
+Each entry now comes back with: `matched`, `match_confidence`,
+`match_method`, `doi`, `title`, `journal_matched` (bool), `quartile`,
+`abstract_available` (bool, not the abstract text itself), `flags` (a
+list of short strings), a compact `claim_support`
+(`checked`/`verdict`/`methodology_flag`/`skipped_reason` -- no
+`rationale`/`confidence`/`methodology_note` at this level), and the usual
+`credits_charged`/`credit_balance(_after)`.
+
+**`flags` is the signal to read, not any of the raw fields it used to
+take their place.** An empty list means exactly that: nothing to report
+beyond matched/confidence, full stop -- don't go looking for a
+`metadata_checks` or `abstract.text` field that isn't there anymore.
+A non-empty list -- e.g. `["retracted"]`, `["metadata_mismatch:pages"]`,
+`["low_confidence"]`, `["unmatched"]`, `["web_search_only"]`,
+`["claim_contradicted"]`, `["claim_methodology_flag"]`,
+`["claim_unverifiable"]`, `["orphaned_citation"]`, or a
+`journal_quality_concern` flag for a blacklisted/flagged journal -- means
+the entry ALSO includes a `detail` object with everything needed to write
+that report entry: full `matched_metadata`, `metadata_checks` (per-field
+cited/found), `abstract`, `escalation` (including
+`verification_note`/`grey_literature`), `claim_confidence`/
+`claim_rationale`/`claim_methodology_note`, `retraction`, and
+`journal_quality`. No second call needed for anything actually worth
+reporting -- this is exactly the case the old verbose-by-default shape
+was solving for, just without paying the cost for every clean reference
+too.
+
+For a reference that came back clean (`flags: []`) but you still want the
+full detail for -- to read its abstract yourself independent of an
+automatic claim check, or to double-check something not surfaced by
+default -- call `get_reference_detail` with that entry's exact
+`reference_string`. It's free (reads back what's already stored, doesn't
+re-verify or spend credits) and returns the complete record. Most
+references never need this; reach for it only when you specifically want
+more than a clean summary line requires.
 
 Batches don't have to be sent one at a time, either -- if your
 environment lets you make multiple tool calls concurrently, you can fire
@@ -436,15 +492,15 @@ categories represent, not just an absolute number:
 | Metric | Count (% of total) |
 |---|---|
 | Bibliography entries audited | total reference_entries |
-| Verified, high/moderate confidence | `matched: true` with `match_confidence` high or moderate, excluding `match_method: "web_search"` |
-| Verified, low confidence | `matched: true` with `match_confidence` low |
-| Verified via web search only (not index-corroborated) | `match_method: "web_search"` -- see below |
-| Grey literature / non-academic source | `escalation.grey_literature` present -- see **[GL]** below |
-| Unverifiable (no match found) | `matched: false` and no `escalation.grey_literature` |
-| Retracted | `retraction.is_retracted: true` |
-| Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | at least one `metadata_checks` field has `status: "mismatch"` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
+| Verified, high/moderate confidence | `matched: true`, `match_confidence` high or moderate, `flags` has no `web_search_only` |
+| Verified, low confidence | `matched: true`, `"low_confidence" in flags` |
+| Verified via web search only (not index-corroborated) | `"web_search_only" in flags` -- see below |
+| Grey literature / non-academic source | `"grey_literature" in flags` -- see **[GL]** below |
+| Unverifiable (no match found) | `"unmatched" in flags` and no `"grey_literature"` |
+| Retracted | `"retracted" in flags` |
+| Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | any flag starting with `metadata_mismatch:` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
 | Duplicate reference entries | from `generate_verification_certificate`'s `duplicate_reference_groups` (only available after that tool has been called -- see its own section below) |
-| In-text citations missing from bibliography | `orphaned_citations` count |
+| In-text citations missing from bibliography | `orphaned_citations` count (free check) or `"orphaned_citation" in flags` count (submitted entries) -- see step 2's reconciliation note; these should agree |
 | Reference entries never cited | `unused_references` count |
 | Not checked (credit limit / scope decision) | explicit count, never omitted |
 
@@ -480,12 +536,33 @@ malformed to identify (no title, no year, etc.) belong here first.
 
 ### 2. Full Verification Table
 
-Legend:
-- **[OK]** `matched: true`, no `metadata_checks` mismatches, not retracted, no journal-quality concern.
-- **[!!]** `matched: true` but a `metadata_checks` field (title/authors/year/venue/volume/issue/pages) shows `mismatch`, or `match_confidence` is low, or journal quality is flagged as a concern, or `match_method` is `"web_search"` (see below). A volume/issue/pages mismatch can mean the wrong paper was matched, but just as often means the reference-list entry itself is incomplete or has a typo (e.g. a missing volume number) -- present it as "check this entry's completeness," not as an accusation that the wrong source was found.
-- **[??]** `matched: false` -- genuinely unverifiable against open bibliographic data. This is **not** an accusation of fabrication -- say so explicitly, matching the header's methodology note.
-- **[GL]** `escalation.grey_literature` is present -- not an academic paper (a government report, industry white paper, standard, etc. with no index entry to match against), but the server captured its full text and wrote a summary directly from the cited source. Present `escalation.grey_literature.summary` here, and don't mark it "Unverifiable" -- it's a different, more informative status than a plain no-match.
-- **[XX]** Confirmed critical: `retraction.is_retracted: true`, or the reference-list entry itself is too malformed to identify (not a matching judgment call -- an observable fact about the entry as written).
+Legend (read from `flags` -- see "Responses are compact by default" in
+step 2 for the full shape; each symbol below checks `flags` first, so
+check them in this order -- retracted and grey-literature take priority
+over a plain "something's flagged"):
+- **[XX]** `"retracted" in flags`, or the reference-list entry itself is
+  too malformed to identify (not a matching judgment call -- an
+  observable fact about the entry as written).
+- **[GL]** `"grey_literature" in flags` -- not an academic paper (a
+  government report, industry white paper, standard, etc. with no index
+  entry to match against), but the server captured its full text and
+  wrote a summary directly from the cited source
+  (`detail.escalation.grey_literature.summary`). Don't mark it
+  "Unverifiable" -- it's a different, more informative status than a
+  plain no-match.
+- **[??]** `"unmatched" in flags` -- genuinely unverifiable against open
+  bibliographic data. This is **not** an accusation of fabrication -- say
+  so explicitly, matching the header's methodology note.
+- **[!!]** `matched: true` but `flags` is non-empty and none of the above
+  apply -- any of `metadata_mismatch:<field>`, `low_confidence`,
+  `web_search_only`, `journal_quality_concern`, `claim_not_supported`,
+  `claim_contradicted`, `claim_methodology_flag`, `claim_unverifiable`. A
+  `metadata_mismatch:` flag can mean the wrong paper was matched, but just
+  as often means the reference-list entry itself is incomplete or has a
+  typo (e.g. a missing volume number) -- present it as "check this
+  entry's completeness," not as an accusation that the wrong source was
+  found.
+- **[OK]** `matched: true`, `flags: []`.
 
 **Automatic web-search/scrape escalation.** The server automatically falls
 back to a paid web search/scrape when the free sources (Crossref/OpenAlex/
@@ -493,15 +570,16 @@ PubMed/Unpaywall) can't resolve something on their own -- a missing
 abstract with a known link, grey literature, or no match at all. This is
 fully automatic; there is nothing you need to do differently to trigger
 it. It surfaces in the response as:
-- `match_method: "web_search"` -- matched, but only via an independent web
+- `"web_search_only" in flags` -- matched, but only via an independent web
   search, never corroborated against a structured bibliographic index.
   Always treat as **[!!]**, never as a plain **[OK]**, regardless of
-  `match_confidence`.
-- `escalation.verification_note` -- a short explanation to carry into your
-  `Notes` column whenever present (e.g. why a web-search match should be
-  treated with extra caution, or that a second opinion corroborated an
-  originally medium-confidence match).
-- `escalation.grey_literature` -- see **[GL]** above.
+  `match_confidence`. Since this flag is always non-empty, `detail` is
+  always present for these.
+- `detail.escalation.verification_note` -- a short explanation to carry
+  into your `Notes` column whenever present (e.g. why a web-search match
+  should be treated with extra caution, or that a second opinion
+  corroborated an originally medium-confidence match).
+- `detail.escalation.grey_literature` -- see **[GL]** above.
 - `credits_charged` may include a small fractional amount on top of the
   flat per-reference cost (e.g. `1.0072` instead of `1`) when one of these
   steps fired, or when the claim-vs-abstract check ran (see step 6.5).
@@ -510,10 +588,12 @@ it. It surfaces in the response as:
 
 Table columns: `#`, `Entry` (as cited), `Status`, `Confidence` (from
 `match_confidence`, or "N/A" if unmatched), `Notes` (the specific
-mismatched field, retraction reason, or journal-quality concern --
-concrete, not vague). For a document processed via the tracking file in
-step 2, add a `Cited from` column listing every chapter/page location on
-record for that reference, instead of just the first one encountered.
+mismatched field with its `detail.metadata_checks[field].cited`/`.found`
+values, retraction reason, or journal-quality concern -- concrete, not
+vague; pull these from `detail`, present whenever `flags` is non-empty).
+For a document processed via the tracking file in step 2, add a
+`Cited from` column listing every chapter/page location on record for
+that reference, instead of just the first one encountered.
 
 ### 3. Orphan Citations
 
@@ -566,29 +646,33 @@ section below for an empty result.
 
 Whenever you submitted `claim_text` for a reference and an abstract was
 found, the server automatically judged whether the abstract actually
-supports the claim, returning this on that reference's result as
-`claim_support`: `checked` (bool), `verdict` (`SUPPORTED` /
-`PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` / `CONTRADICTED` /
-`CANNOT_ASSESS`), `confidence`, `rationale`, and -- independent of that
-verdict -- `methodology_flag`/`methodology_note` for methodological
-over-generalization: a claim that generalizes, universalizes, or assigns
-causation beyond what the cited study's own methodology (sample size,
-qualitative/quantitative design, scope) can actually support. A citation
-can be `SUPPORTED` (an accurate paraphrase of the finding itself) and
-still carry a `methodology_flag` -- treating a small qualitative study's
-findings as if broadly, quantitatively generalizable, or a correlational
-finding as if causal, is a distinct error from misquoting the finding,
-and both matter for this section.
+supports the claim, returning this on that reference's result as a
+compact top-level `claim_support`: `checked` (bool), `verdict`
+(`SUPPORTED` / `PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` / `CONTRADICTED` /
+`CANNOT_ASSESS`), and -- independent of that verdict -- `methodology_flag`
+for methodological over-generalization: a claim that generalizes,
+universalizes, or assigns causation beyond what the cited study's own
+methodology (sample size, qualitative/quantitative design, scope) can
+actually support. A citation can be `SUPPORTED` (an accurate paraphrase of
+the finding itself) and still carry a `methodology_flag` -- treating a
+small qualitative study's findings as if broadly, quantitatively
+generalizable, or a correlational finding as if causal, is a distinct
+error from misquoting the finding, and both matter for this section.
+`confidence`, `rationale`, and `methodology_note` (the full prose behind
+the verdict/flag) live in `detail.claim_confidence`/`detail.claim_rationale`/
+`detail.claim_methodology_note` -- present whenever `flags` contains
+`claim_not_supported`, `claim_contradicted`, or `claim_methodology_flag`,
+i.e. exactly the entries this section lists.
 
 List every entry here where `claim_support.checked` is true and either
 the verdict is `NOT_SUPPORTED`/`CONTRADICTED`, or `methodology_flag` is
-set: citation, actual topic (from `matched_metadata`), how it's used in
-the document, and the concern (`claim_support.rationale` and/or
-`methodology_note`, in your own words if that reads better). This is a
-second, independent check, not a replacement for your own reading --
-also flag anything you notice yourself that the automatic check didn't
-catch or that came back `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as
-you always could.
+set: citation, actual topic (from `detail.matched_metadata`), how it's
+used in the document, and the concern (`detail.claim_rationale` and/or
+`detail.claim_methodology_note`, in your own words if that reads better).
+This is a second, independent check, not a replacement for your own
+reading -- also flag anything you notice yourself that the automatic
+check didn't catch or that came back
+`PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as you always could.
 
 Separately, list every entry where `claim_support.skipped_reason` is
 `"no_abstract_available"` or `"assessment_failed"` under its own
@@ -634,11 +718,18 @@ claims central to the manuscript's own argument.
 
 ### 6. Journal Quality Distribution
 
-Aggregate `journal_quality` across matched references into a table
-(category, count, examples) -- e.g. accredited/indexed, not
-matched/no record, flagged by DHET/Norwegian Register/DOAJ standing.
-**Do not** characterize this as covering Scopus/Web of Science/Scimago
-quartile data -- see the closing note below on why.
+Aggregate across matched references into a table (category, count,
+examples) using the compact top-level fields every entry already carries
+(`journal_matched`, `quartile`) plus the `journal_quality_concern` flag --
+no need for `detail`/`get_reference_detail` on every reference just to
+build this table: `journal_matched: false` -> "not matched/no record";
+`journal_matched: true` and no `journal_quality_concern` flag ->
+"accredited/indexed" (break down further by `quartile` where present);
+`"journal_quality_concern" in flags` -> "flagged" (pull the specific
+DHET/Norwegian Register/DOAJ/blacklist reason from that entry's
+`detail.journal_quality`, since a flagged entry always has `detail`
+present). **Do not** characterize this as covering Scopus/Web of
+Science/Scimago quartile data -- see the closing note below on why.
 
 ### 7. Recommendations (Prioritised)
 
