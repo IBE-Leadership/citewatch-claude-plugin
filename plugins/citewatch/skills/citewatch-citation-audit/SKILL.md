@@ -413,12 +413,23 @@ A non-empty list -- e.g. `["retracted"]`, `["metadata_mismatch:pages"]`,
 the entry ALSO includes a `detail` object with everything needed to write
 that report entry: full `matched_metadata`, `metadata_checks` (per-field
 cited/found), `abstract`, `escalation` (including
-`verification_note`/`grey_literature`), `claim_confidence`/
-`claim_rationale`/`claim_methodology_note`, `retraction`, and
-`journal_quality`. No second call needed for anything actually worth
+`verification_note`/`grey_literature`), `claims` (see below), `retraction`,
+and `journal_quality`. No second call needed for anything actually worth
 reporting -- this is exactly the case the old verbose-by-default shape
 was solving for, just without paying the cost for every clean reference
 too.
+
+**One citation, many claims.** The same reference can be cited more than
+once with a different attributable claim each time, so `claim_support` in
+every response (compact or detail) is a *count*, not a single verdict:
+`{"claims_checked": N, "claims_flagged": N, "claims_unverifiable": N}` --
+"how many claims were checked against this reference, and how many of
+those held up." The full per-claim breakdown -- each claim's own text,
+verdict, confidence, rationale, methodology flag/note -- is in
+`detail.claims` (a list, one entry per claim actually submitted) whenever
+`flags` is non-empty, or via `get_reference_detail` otherwise. Don't look
+for a single `claim_support.verdict`/`claim_support.checked` field
+anymore -- that shape is gone; iterate `detail.claims` instead.
 
 For a reference that came back clean (`flags: []`) but you still want the
 full detail for -- to read its abstract yourself independent of an
@@ -584,14 +595,16 @@ when their count is zero (write `0 (0%)` explicitly, same discipline as
 
 If any `claim_text` was submitted anywhere in the audit, add two more
 rows immediately after the table above, percentaged against the number of
-claims actually **checked** (i.e. had `claim_support.checked: true`), not
-against total bibliography entries -- most entries typically won't have
-had a claim submitted at all, so "% of total" would understate things:
+claims actually **checked** (sum every reference's `claim_support.claims_checked`),
+not against total bibliography entries -- most entries typically won't
+have had a claim submitted at all, so "% of total" would understate
+things. A reference can contribute more than one claim to these totals
+(one citation, many claims):
 
 | Metric | Count (% of claims checked) |
 |---|---|
-| Cited claims checked against abstract | total `claim_support.checked: true` count (this row alone is % of total bibliography entries, not of itself) |
-| Flagged: unsupported, contradicted, or methodology mismatch | `claim_support.verdict` in `NOT_SUPPORTED`/`CONTRADICTED`, or `claim_support.methodology_flag` set |
+| Cited claims checked against abstract | sum of every reference's `claim_support.claims_checked` (this row alone is % of total bibliography entries, not of itself) |
+| Flagged: unsupported, contradicted, or methodology mismatch | sum of every reference's `claim_support.claims_flagged` -- see `detail.claims` for which specific claim(s) on a given reference triggered it |
 
 Omit both rows entirely if no claims were checked at all (rather than
 writing `0 (0%)`) -- unlike the escalation rows above, which reflect
@@ -714,47 +727,54 @@ section below for an empty result.
 
 ### 5. Contextual Misuse Flags
 
-Whenever you submitted `claim_text` for a reference and an abstract was
-found, the server automatically judged whether the abstract actually
-supports the claim, returning this on that reference's result as a
-compact top-level `claim_support`: `checked` (bool), `verdict`
-(`SUPPORTED` / `PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` / `CONTRADICTED` /
-`CANNOT_ASSESS`), and -- independent of that verdict -- `methodology_flag`
-for methodological over-generalization: a claim that generalizes,
+Whenever you submitted `claim_text` for a reference and an abstract (or,
+for grey literature, its Qwen-written summary) was found, the server
+automatically judged whether that text actually supports the claim. A
+reference can now carry more than one of these checks -- the same source
+cited more than once with a different attributable claim each time (a
+bare mention early on, a specific finding attributed to it later) -- so
+`claim_support` on every response is a *count*, not a single verdict:
+`{"claims_checked": N, "claims_flagged": N, "claims_unverifiable": N}`.
+The full per-claim breakdown lives in `detail.claims` (present whenever
+`flags` contains `claim_not_supported`, `claim_contradicted`, or
+`claim_methodology_flag`) -- a list, one entry per claim actually
+submitted for this reference, each with its own `claim_text`, `checked`
+(bool), `verdict` (`SUPPORTED` / `PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` /
+`CONTRADICTED` / `CANNOT_ASSESS`), `confidence`, `rationale`, and --
+independent of the verdict -- `methodology_flag`/`methodology_note` for
+methodological over-generalization: a claim that generalizes,
 universalizes, or assigns causation beyond what the cited study's own
 methodology (sample size, qualitative/quantitative design, scope) can
-actually support. A citation can be `SUPPORTED` (an accurate paraphrase of
+actually support. A claim can be `SUPPORTED` (an accurate paraphrase of
 the finding itself) and still carry a `methodology_flag` -- treating a
 small qualitative study's findings as if broadly, quantitatively
 generalizable, or a correlational finding as if causal, is a distinct
 error from misquoting the finding, and both matter for this section.
-`confidence`, `rationale`, and `methodology_note` (the full prose behind
-the verdict/flag) live in `detail.claim_confidence`/`detail.claim_rationale`/
-`detail.claim_methodology_note` -- present whenever `flags` contains
-`claim_not_supported`, `claim_contradicted`, or `claim_methodology_flag`,
-i.e. exactly the entries this section lists.
 
-List every entry here where `claim_support.checked` is true and either
-the verdict is `NOT_SUPPORTED`/`CONTRADICTED`, or `methodology_flag` is
-set: citation, actual topic (from `detail.matched_metadata`), how it's
-used in the document, and the concern (`detail.claim_rationale` and/or
-`detail.claim_methodology_note`, in your own words if that reads better).
-This is a second, independent check, not a replacement for your own
-reading -- also flag anything you notice yourself that the automatic
-check didn't catch or that came back
+List every FLAGGED CLAIM here (not every flagged reference -- a reference
+with 3 claims checked and 1 flagged should show that one specific claim,
+not imply all 3 are suspect): from `detail.claims`, each entry where
+`checked` is true and either the verdict is
+`NOT_SUPPORTED`/`CONTRADICTED`, or `methodology_flag` is set. For each:
+the citation, its actual topic (from `detail.matched_metadata`), the
+specific claim text (`claim_text`) and how it's used in the document, and
+the concern (`rationale` and/or `methodology_note`, in your own words if
+that reads better). This is a second, independent check, not a
+replacement for your own reading -- also flag anything you notice
+yourself that the automatic check didn't catch or that came back
 `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as you always could.
 
-Separately, list every entry where `claim_support.skipped_reason` is
-`"no_abstract_available"` or `"assessment_failed"` under its own
-"Claims Submitted But Unverifiable" subheading -- these had `claim_text`
-submitted (unlike the overwhelming majority, where
-`skipped_reason: "no_claim_text_submitted"` just means checking wasn't
-attempted) but genuinely could not be assessed, most often because no
-abstract exists for that source. Never present these as `SUPPORTED` or
-otherwise fold them into the flagged-claims list above -- they are a
-third, distinct state (attempted and inconclusive, not checked-and-clean
-and not checked-and-flagged), and a reader needs to be able to tell all
-three apart.
+Separately, list every claim (again from `detail.claims`, not a whole
+reference) where `skipped_reason` is `"no_abstract_available"` or
+`"assessment_failed"` under its own "Claims Submitted But Unverifiable"
+subheading -- these had `claim_text` submitted (unlike the overwhelming
+majority, where `skipped_reason: "no_claim_text_submitted"` just means
+checking wasn't attempted) but genuinely could not be assessed, most
+often because no abstract or summary exists for that source. Never
+present these as `SUPPORTED` or otherwise fold them into the flagged-
+claims list above -- they are a third, distinct state (attempted and
+inconclusive, not checked-and-clean and not checked-and-flagged), and a
+reader needs to be able to tell all three apart.
 
 State the coverage explicitly at the top of this section: how many
 claims were checked out of how many references in the bibliography (this
