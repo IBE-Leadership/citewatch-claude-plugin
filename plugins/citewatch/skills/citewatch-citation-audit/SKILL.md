@@ -82,6 +82,34 @@ section) -- so this is genuinely worth doing across the manuscript, not
 just for a few spot-checked claims, wherever the body text makes an
 attributable claim to a reference.
 
+**Also send `claim_section`, and don't hand-edit `claim_text`.** Name
+which part of the document the citing sentence is in --
+`"introduction"`, `"literature_review"`, `"methods"`, `"results"`,
+`"discussion"`, `"conclusion"`, `"abstract"`, or `"other"` -- as
+`claim_section` alongside `claim_text` on the same call. This is a cheap,
+mechanical lookup (which heading is this sentence under), never a
+judgment call about the sentence's wording, and it matters: in the
+introduction/literature review, a citation typically attributes a finding
+directly to the source ("Smith (2020) found X"), but in the discussion,
+conclusion, and often results (where a study interleaves its own numbers
+with literature comparisons), a citation is conventionally used to situate
+the AUTHOR'S OWN result against prior work ("our finding of X is
+consistent with Smith, 2020") -- the specific statistic there belongs to
+the manuscript being audited, not the cited source. Submitting `claim_text`
+verbatim from a discussion/conclusion sentence like that, with no
+`claim_section`, used to get misread as an attribution and could flag it
+`claim_not_supported`/`claim_contradicted` simply because Smith's abstract
+doesn't happen to contain the author's own number -- a false fabrication
+flag on a citation that never claimed the source reported that figure.
+Do NOT try to fix this yourself by rewriting or trimming `claim_text` down
+to "just the attributable part" -- that reintroduces the same fragile,
+error-prone parsing this field exists to avoid. Send the sentence
+unedited, set `claim_section` correctly, and the server applies the right
+tolerance for that section automatically (lenient about a missing exact
+figure in discussion/conclusion/results, strict attribution elsewhere).
+Omit `claim_section` only when you genuinely can't tell which section a
+claim falls in.
+
 **When one sentence cites two or more references together** (e.g. "Prior
 work has found X (Smith, 2020; Jones, 2019; Lee, 2021)"), include the
 *same* `claim_text` on **each** of those references' own entries in the
@@ -738,7 +766,8 @@ bare mention early on, a specific finding attributed to it later) -- so
 The full per-claim breakdown lives in `detail.claims` (present whenever
 `flags` contains `claim_not_supported`, `claim_contradicted`, or
 `claim_methodology_flag`) -- a list, one entry per claim actually
-submitted for this reference, each with its own `claim_text`, `checked`
+submitted for this reference, each with its own `claim_text`,
+`claim_section` (whatever you sent, if anything), `checked`
 (bool), `verdict` (`SUPPORTED` / `PARTIALLY_SUPPORTED` / `NOT_SUPPORTED` /
 `CONTRADICTED` / `CANNOT_ASSESS`), `confidence`, `rationale`, and --
 independent of the verdict -- `methodology_flag`/`methodology_note` for
@@ -763,6 +792,14 @@ that reads better). This is a second, independent check, not a
 replacement for your own reading -- also flag anything you notice
 yourself that the automatic check didn't catch or that came back
 `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as you always could.
+
+A flagged claim whose `claim_section` is `"discussion"`, `"conclusion"`,
+or `"results"` was already judged leniently about missing exact figures
+(see the claim-extraction guidance above) -- if it's still flagged, that
+means the abstract looked genuinely unrelated or pointed the opposite
+direction from what the manuscript claims it corroborates, not just that
+the abstract lacks the author's own number. Say so plainly when writing
+this up, so the reader doesn't read it as an ordinary misattribution.
 
 Separately, list every claim (again from `detail.claims`, not a whole
 reference) where `skipped_reason` is `"no_abstract_available"` or
