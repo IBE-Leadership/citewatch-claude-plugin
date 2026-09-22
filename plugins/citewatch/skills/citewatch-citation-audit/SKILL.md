@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.15"
+  version: "2.17"
 ---
 
 # CiteWatch citation audit workflow
@@ -149,6 +149,32 @@ the `claim_text` you're about to send. If it doesn't, the extraction picked
 the wrong sentence -- go back and find the right one rather than submitting
 it anyway. This check is cheap and mechanical, and it catches exactly the
 failure mode above before it ever reaches CiteWatch.
+
+### Parse and pass the reference's own cited metadata -- not just `reference_string`
+
+`verify_reference`/`verify_manuscript_references` accept `cited_title`,
+`cited_authors`, `cited_year`, and `cited_venue` as separate arguments,
+parsed out of the reference-list entry itself. These are not just cosmetic
+inputs for the metadata-mismatch report line (`detail.metadata_checks`) --
+`cited_year` and `cited_title` feed directly into server-side matching:
+title similarity is scored against `cited_title` when it's supplied,
+instead of falling back to fuzzy-matching the whole raw `reference_string`,
+and `cited_year` is checked against the resolved candidate's own year to
+decide whether the match is confident. Omitting them doesn't just weaken
+the report -- it can let the wrong source through completely undetected.
+This has happened in practice: a reference to "Newman et al. (2018)" was
+matched to a 1999 book review by the same author surname, because
+`cited_year` was never passed and nothing forced a year check against the
+edition actually found. Passing `cited_year: 2018` would have surfaced a
+stark year mismatch automatically, catching the wrong-edition match before
+it reached the report.
+
+Parse and pass all four fields on every verify call whenever the
+reference-list entry gives you the information to do so -- which is nearly
+always true for a properly formatted entry. Only fall back to
+`reference_string` alone for a field the entry is genuinely too malformed
+to parse -- and when that happens, the malformation itself is worth
+flagging per step 6's **[XX]** category, not silently worked around.
 
 ### On a large manuscript, this is a real scope decision -- make it out loud, not silently
 
@@ -644,6 +670,7 @@ categories represent, not just an absolute number:
 | Verified, low confidence | `matched: true`, `"low_confidence" in flags` |
 | Verified via web search only (not index-corroborated) | `"web_search_only" in flags` -- see below |
 | Grey literature / non-academic source | `"grey_literature" in flags` -- see **[GL]** below |
+| DOI corrected (cited DOI didn't resolve; automated repair found and verified the right one) | `"doi_corrected" in flags` -- see **[DC]** below |
 | Unverifiable (no match found) | `"unmatched" in flags` and no `"grey_literature"` |
 | Retracted | `"retracted" in flags` |
 | Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | any flag starting with `metadata_mismatch:` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
@@ -652,13 +679,19 @@ categories represent, not just an absolute number:
 | Reference entries never cited | `unused_references` count |
 | Not checked (credit limit / scope decision) | explicit count, never omitted |
 
-The "Verified via web search only" and "Grey literature / non-academic
-source" rows exist so a reader can see at a glance how much of the
-bibliography rests on a weaker or different kind of verification than a
-direct bibliographic-index match -- never fold these into the plain
-"Verified"/"Unverifiable" counts above them, and never omit them even
-when their count is zero (write `0 (0%)` explicitly, same discipline as
-"Not checked").
+The "Verified via web search only", "Grey literature / non-academic
+source", and "DOI corrected" rows exist so a reader can see at a glance how
+much of the bibliography rests on a weaker or different kind of
+verification than a direct bibliographic-index match -- never fold these
+into the plain "Verified"/"Unverifiable" counts above them, and never omit
+them even when their count is zero (write `0 (0%)` explicitly, same
+discipline as "Not checked"). Unlike the other two, a nonzero "DOI
+corrected" count is a genuine, positive finding about the CORRECTED source
+(it verified cleanly once the right DOI was used) rather than a weaker kind
+of verification -- but it still belongs in its own row rather than folded
+into plain "Verified," because it means the manuscript's own bibliography
+has a DOI that needs fixing, which is worth surfacing on its own even
+though the underlying source itself checked out fine.
 
 If any `claim_text` was submitted anywhere in the audit, add two more
 rows immediately after the table above, percentaged against the number of
@@ -688,8 +721,8 @@ malformed to identify (no title, no year, etc.) belong here first.
 
 Legend (read from `flags` -- see "Responses are compact by default" in
 step 2 for the full shape; each symbol below checks `flags` first, so
-check them in this order -- retracted and grey-literature take priority
-over a plain "something's flagged"):
+check them in this order -- retracted, grey-literature, and DOI-corrected
+take priority over a plain "something's flagged"):
 - **[XX]** `"retracted" in flags`, or the reference-list entry itself is
   too malformed to identify (not a matching judgment call -- an
   observable fact about the entry as written).
@@ -700,6 +733,27 @@ over a plain "something's flagged"):
   (`detail.escalation.grey_literature.summary`). Don't mark it
   "Unverifiable" -- it's a different, more informative status than a
   plain no-match.
+- **[DC]** `"doi_corrected" in flags` -- the DOI as printed in the
+  reference list didn't resolve to anything, but the server ran a bounded,
+  free repair search (small mechanical edits to the DOI's trailing digits
+  -- a dropped digit, an extra digit, a single misread digit) and found a
+  corrected DOI whose title/metadata closely match this reference. Read
+  `detail.escalation.doi_correction` for the exact `cited_doi` (as printed)
+  and `corrected_doi` (what the server verified against) -- state both in
+  the report line. This is matched, not unmatched: the abstract,
+  retraction, and journal-quality checks below all ran against the
+  corrected record, so claim-support analysis works normally against it
+  too. Report this as a likely transcription error in the manuscript's own
+  bibliography, not as evidence of a fabricated or nonexistent source --
+  the source itself was found and verified; only the DOI as printed was
+  wrong. If the server's repair search couldn't find or validate a
+  correction (most DOI typos more complex than a single trailing-digit
+  slip), the reference falls through to **[??]**/**[GL]** below as usual --
+  **[DC]** only appears when a correction was actually found and verified,
+  never as a "we suspect a typo" guess of your own; don't try to manually
+  guess or propose a corrected DOI yourself when this flag is absent, since
+  an unverified guess is exactly the kind of unchecked claim this audit
+  exists to avoid.
 - **[??]** `"unmatched" in flags` -- genuinely unverifiable against open
   bibliographic data. This is **not** an accusation of fabrication -- say
   so explicitly, matching the header's methodology note.
@@ -832,6 +886,23 @@ replacement for your own reading -- also flag anything you notice
 yourself that the automatic check didn't catch or that came back
 `PARTIALLY_SUPPORTED`/`CANNOT_ASSESS`, same as you always could.
 
+**Carry each entry's own `match_method` and `match_confidence` into this
+list -- never collapse the whole list under one blanket confidence line.**
+The Full Verification Table (section 2 above) already requires this
+per-entry distinction; it's just as necessary here and easy to drop when
+compiling a flagged-claims table separately, especially when re-assembling
+a report after fixing an earlier extraction error. A flagged claim on a
+`match_method: "web_search_only"` or grey-literature entry is weaker
+evidence than the identical flag on a clean indexed match, and a reader
+comparing this section to the main table needs to see that difference here
+too, not just infer it by cross-referencing the entry number back to
+section 2. Pull `match_method` and `match_confidence` from the same
+response object as the flag itself (or `get_reference_detail` if you no
+longer have it in context) for every row in this list -- writing "high or
+medium confidence" once for the whole table is exactly the shortcut that
+caused this class of finding to be reported without an important
+distinction it should have carried.
+
 A flagged claim whose `claim_section` is `"discussion"`, `"conclusion"`,
 or `"results"` was already judged leniently about missing exact figures
 (see the claim-extraction guidance above) -- if it's still flagged, that
@@ -902,7 +973,9 @@ Science/Scimago quartile data -- see the closing note below on why.
 - **Priority 1 -- Critical (must fix):** confirmed retractions, orphaned
   foundational sources, malformed entries that can't be identified.
 - **Priority 2 -- Major (should fix):** metadata mismatches, unused
-  references, style inconsistencies.
+  references, style inconsistencies, DOI-corrected entries (**[DC]** --
+  name the cited and corrected DOI for each, so the author can fix the
+  bibliography entry directly rather than re-deriving the correction).
 - **Priority 3 -- Recommended:** journal-quality concerns worth
   reviewing, formatting standardization.
 
