@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.18"
+  version: "2.19"
 ---
 
 # CiteWatch citation audit workflow
@@ -290,6 +290,29 @@ server issues a new one, track it separately from the original, and
 generate a separate certificate for the corrected pass at the end (per step
 7) rather than trying to fold corrected results back into the
 already-certified session.
+
+**If the user wants a genuinely independent re-verification of a
+manuscript you've already audited -- a clean-room re-test, checking
+whether a fix or a newer skill/prompt version changes the result, a
+second opinion -- pass `force_refresh: true` on every call in that pass.**
+A fresh `audit_session_id` (above) is necessary but **not sufficient** for
+this: by default, if a reference_string from the earlier audit was left
+**uncertified** (an audit that was interrupted, only partially certified,
+or never finished `generate_verification_certificate`), CiteWatch silently
+plays back that old, uncertified result instead of re-verifying anything
+-- a fresh session id changes which session the NEW result gets filed
+under, but does nothing to stop the old one from being reused in the first
+place. Confirmed in practice: a 169-reference re-audit, run specifically
+to independently confirm a prior audit's findings, only freshly
+re-verified 29 of the 169 -- the other 140 silently replayed uncertified
+results left over from the earlier run, undercutting the entire point of
+re-running it. `force_refresh: true` discards any existing uncertified
+result for each reference first and forces a genuinely fresh pipeline run
+-- a full credit charge per reference, same as any other fresh
+verification, not free. Only set it for a deliberate re-verification pass;
+leave it false (the default) for an ordinary resume/retry within the SAME
+audit, where reusing an uncertified result is exactly the intended,
+free behavior.
 
 **Step A -- Size up the document before touching it.** Decide which of
 three cases you're in, and commit to the matching unit of work before
