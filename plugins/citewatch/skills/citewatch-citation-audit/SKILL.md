@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.17"
+  version: "2.18"
 ---
 
 # CiteWatch citation audit workflow
@@ -361,6 +361,26 @@ If you have file-write access in this environment, save and update both
 the todo list and the tracking table on disk as you go, rather than
 holding them only in the conversation.
 
+**Prefer persisting each tool call's response near-verbatim over a
+hand-condensed summary.** It's tempting, especially in a long audit, to
+compress each result down to a short human-readable line when writing it
+into the tracking table (verdict + a phrase, not the full JSON) -- readable
+in the moment, but it destroys traceability: confirmed in practice, one
+audit's condensed tracking files preserved full per-claim detail for only
+72 of 114 checked claims, so roughly a third of the claim verdicts in the
+final report couldn't be traced back to the raw tool output at all without
+re-spending credits to re-run verification. Where you have the room for
+it, persist the response body (or at minimum every field the report
+actually draws on: `flags`, `detail.matched_metadata`,
+`detail.metadata_checks`, `detail.claims`, `detail.escalation`,
+`detail.retraction`, `detail.journal_quality`) rather than a condensed
+paraphrase. If space or environment constraints genuinely force
+condensing for some or all entries, that's an acceptable tradeoff -- but
+disclose it as an explicit limitation in the final report (how many
+entries have only a condensed record, not full per-claim/per-field
+detail) rather than leaving a reader to discover it only if they try to
+audit a specific entry and find nothing to check it against.
+
 **Step C -- Work through one unit at a time, in document order.** For
 cases 1 and 2, process chapters/sections strictly in order, one at a
 time -- never skip ahead "to get a feel for the whole document" first,
@@ -564,6 +584,38 @@ structure you're dealing with before extraction, not after.
 
 ## 3. Run the free checks first, and treat their output as leads, not verdicts
 
+### Before trusting either free check's output, confirm the extraction it's built from is actually complete
+
+`check_citation_reference_balance` and `check_referencing_style_consistency`
+are pure local matching over the citation lists *you* extracted -- they
+have no access to the source document at all, so they cannot tell a
+genuinely missing citation apart from one that simply never made it into
+your own extraction list. Confirmed in practice: a real audit's in-text-
+citation list silently lost several real citations (a mix of author-name
+and organization-name citations) across a context-compaction event
+mid-session -- the extraction file simply never picked them back up after
+the session resumed -- and the free balance check, built from that
+incomplete list, then flagged bibliography entries as "unused" partly
+because the citations that would have matched them were never in its
+input to begin with. Neither free check has any way to detect this; both
+trust the list you hand them completely, the same way a verify call trusts
+its `reference_string` input (see step 1's warning about contaminated
+payloads).
+
+Before calling either free check, and again immediately after resuming
+from a context-compaction event or a new session picking up an
+in-progress audit, spot-check the extraction list against the actual
+source text: pick several paragraphs at random -- and specifically
+whatever was read right before the point compaction happened or the prior
+session ended, since that's exactly the boundary where an entry silently
+drops -- and confirm every citation in them made it into the list. This is
+a cheap, mechanical check. It matters precisely because the failure mode
+is silent: the list looks complete (nothing errors, nothing looks
+obviously short), while quietly missing entries from whatever wasn't
+re-confirmed after resuming.
+
+### Read the results as leads, not verdicts
+
 `check_citation_reference_balance` and `check_referencing_style_consistency`
 are free (no credits) but are pure local matching over the citation lists
 *you* extracted -- they have no access to the source document and cannot
@@ -574,6 +626,50 @@ substance in how you present results. Never state an `orphaned_citations`,
 `unused_references`, or `flagged_entries` item as a confirmed finding --
 frame each one as a candidate the user should verify against their own
 document.
+
+### Every orphan/unused candidate must be reconciled before it can appear in the report
+
+Reconciliation is not optional and not a nice-to-have -- an orphan/unused
+candidate may never go into the report as raw tool output. Confirmed in
+practice: of 14 candidates one real audit's free check flagged as
+"orphaned in-text citations," 13 turned out to have an exact match
+already sitting in the bibliography once checked directly -- the free
+check's own surname+year matching simply failed on ordinary formatting
+differences. The 14th failed to match purely because of an
+apostrophe-encoding difference between the in-text citation and the
+bibliography entry (a curly vs. straight apostrophe in a name like
+Dall'Ora). None of the 14 were genuine gaps. The honest characterization
+of a result like that is "essentially all false positives," not "most are
+likely artifacts" -- get the reconciliation done so you can say the
+stronger, more accurate thing instead of hedging around a result you never
+actually checked.
+
+Before any `orphaned_citations` or `unused_references` candidate appears
+in the report:
+
+- For a candidate **orphaned in-text citation**, do an independent
+  surname+year search directly against the actual bibliography text (not
+  the extracted list you built -- the source document's own reference list
+  itself), checking for the kind of formatting differences fuzzy matching
+  misses: a different citation style, an initial vs. full first name, a
+  reordered author list.
+- For a candidate **unused reference**, do a direct search of the source
+  text for that reference's surname, specifically checking accent and
+  apostrophe-encoding variants (curly `'` vs. straight `'`, accented vs.
+  unaccented letters, e.g. `é`/`e`) -- these are exactly the class of
+  difference the free check's fuzzy matching misses and a plain
+  case-sensitive search would too.
+- Only a candidate that still doesn't resolve after this direct check may
+  be reported as a genuine orphaned-citation or unused-reference finding.
+
+State the reconciliation itself in the report, not just the survivors:
+"the free check flagged N raw candidates; M were resolved as false
+positives via direct surname/accent-variant matching against the source
+text, leaving K genuine [orphaned in-text citations / unused references]."
+Reporting the raw tool count alone, as if it were the finding, overstates
+the problem by exactly the amount this reconciliation step catches -- see
+step 6.3's Orphan Citations section and the Executive Summary table, both
+of which require this same raw-vs-reconciled breakdown, not a bare count.
 
 `check_journal_quality` and `check_retraction_status` are also free and
 can be run per matched source without affecting the credit budget.
@@ -675,8 +771,8 @@ categories represent, not just an absolute number:
 | Retracted | `"retracted" in flags` |
 | Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | any flag starting with `metadata_mismatch:` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
 | Duplicate reference entries | from `generate_verification_certificate`'s `duplicate_reference_groups` (only available after that tool has been called -- see its own section below) |
-| In-text citations missing from bibliography | `orphaned_citations` count (free check) or `"orphaned_citation" in flags` count (submitted entries) -- see step 2's reconciliation note; these should agree |
-| Reference entries never cited | `unused_references` count |
+| In-text citations missing from bibliography | genuine count **after** reconciliation (step 3's mandatory reconciliation, not the raw `orphaned_citations` count) -- state both, e.g. "2 (raw: 14)" |
+| Reference entries never cited | genuine count **after** reconciliation (step 3's mandatory reconciliation, not the raw `unused_references` count) -- state both, same as above |
 | Not checked (credit limit / scope decision) | explicit count, never omitted |
 
 The "Verified via web search only", "Grey literature / non-academic
@@ -717,6 +813,29 @@ first) -- confirmed retractions, foundational/heavily-cited sources that
 are orphaned, and any entry where the reference-list text itself is too
 malformed to identify (no title, no year, etc.) belong here first.
 
+**Reserve "CRITICAL" for a genuine topical mismatch central to the
+manuscript's own argument -- never apply it automatically just because a
+claim came back `NOT_SUPPORTED`/`CONTRADICTED`.** Confirmed in practice: a
+flagged claim sitting in an ordinary discussion-section paragraph -- the
+student contextualizing their own finding against prior literature ("our
+finding is consistent with Smith, 2020"), exactly the pattern step 1's
+`claim_section` guidance describes -- was labeled CRITICAL in one real
+report, when the actual sentence, checked directly against the manuscript,
+turned out to be conventional literature-contextualizing, not a direct
+misattribution of a specific result to the cited source. That's a real
+weakness worth flagging (see step 6.5's Contextual Misuse Flags section),
+but it is not the same severity as a fabricated author list, a retracted
+source presented as sound, or a citation whose claim is centrally load-
+bearing for the paper's own argument and demonstrably contradicted by the
+source. Before labeling anything CRITICAL here, check its `claim_section`
+and re-read the actual sentence in context: a `discussion`/`conclusion`/
+`results`-section claim doing ordinary literature-contextualizing gets
+calibrated language ("worth reviewing," "a weaker citation than ideal")
+instead of an automatic CRITICAL label, even if the automatic claim check
+flagged it. Reserve CRITICAL for cases where the topical mismatch is
+central to what the manuscript is actually arguing, not merely present
+somewhere in a flagged claim.
+
 ### 2. Full Verification Table
 
 Legend (read from `flags` -- see "Responses are compact by default" in
@@ -756,7 +875,20 @@ take priority over a plain "something's flagged"):
   exists to avoid.
 - **[??]** `"unmatched" in flags` -- genuinely unverifiable against open
   bibliographic data. This is **not** an accusation of fabrication -- say
-  so explicitly, matching the header's methodology note.
+  so explicitly, matching the header's methodology note. **Never blend your
+  own general knowledge into this row's report line as if CiteWatch had
+  verified it.** Confirmed in practice: a report added commentary like
+  "well-known real publication -- likely a tool limitation" onto several
+  [??] entries, written in a way that read as though the source's existence
+  had been confirmed, when in fact that was the model's own prior
+  knowledge, never checked by CiteWatch at all. If you recognize a source
+  and have your own opinion about why it didn't match (a preprint not yet
+  indexed, a very new publication, a non-English venue), you may say so --
+  but it must be visibly and explicitly your own judgment, not CiteWatch's
+  finding, e.g. "CiteWatch could not verify this against open bibliographic
+  data (my own assessment, not verified by the tool: this may be a recent
+  or non-English-language publication not yet indexed)." Never phrase it in
+  a way a reader could mistake for something the tool itself confirmed.
 - **[!!]** `matched: true` but `flags` is non-empty and none of the above
   apply -- any of `metadata_mismatch:<field>`, `low_confidence`,
   `web_search_only`, `journal_quality_concern`, `claim_not_supported`,
@@ -802,11 +934,21 @@ that reference, instead of just the first one encountered.
 ### 3. Orphan Citations
 
 From `check_citation_reference_balance`'s `orphaned_citations` and
-`unused_references`. Carry forward that tool's `extraction_disclaimer`
-in substance: these are candidates for the user to check against their
-own document, not confirmed gaps. Flag foundational/theory-defining
-sources specifically if orphaned -- an examiner or reviewer notices
-those fastest.
+`unused_references`, **after** step 3's mandatory reconciliation --
+never the raw tool output. Open this section with the reconciliation
+itself, not just the survivors: "The free structural check flagged N raw
+candidates; M were resolved as false positives (formatting/accent/
+apostrophe-encoding differences the check's own matching missed) via a
+direct search against the source document, leaving K genuine
+[orphaned citations / unused references]." List only the K genuine
+entries below that line -- a candidate that reconciled away does not
+belong in this section at all, not even with a note that it was resolved
+(the reconciliation summary line already covers that). Carry forward the
+tool's `extraction_disclaimer` in substance for whatever remains: these
+are still candidates for the user to give a final check against their own
+document, not confirmed gaps, even after reconciliation. Flag
+foundational/theory-defining sources specifically if orphaned -- an
+examiner or reviewer notices those fastest.
 
 Per step 2's mandatory procedure, each orphaned citation was also sent to
 CiteWatch on its own (using the bare in-text citation as `reference_string`
@@ -909,7 +1051,13 @@ or `"results"` was already judged leniently about missing exact figures
 means the abstract looked genuinely unrelated or pointed the opposite
 direction from what the manuscript claims it corroborates, not just that
 the abstract lacks the author's own number. Say so plainly when writing
-this up, so the reader doesn't read it as an ordinary misattribution.
+this up, so the reader doesn't read it as an ordinary misattribution --
+and, per the Executive Summary's severity-calibration rule above, this is
+exactly the kind of entry that must **not** default to a CRITICAL label
+just because it's flagged: a discussion/conclusion/results-section claim
+doing ordinary literature-contextualizing gets calibrated language here,
+reserving CRITICAL for a genuine topical mismatch central to the
+manuscript's own argument.
 
 Separately, list every claim (again from `detail.claims`, not a whole
 reference) where `skipped_reason` is `"no_abstract_available"` or
@@ -984,7 +1132,13 @@ Science/Scimago quartile data -- see the closing note below on why.
 A short paragraph. State the coverage caveat here in the *opening*
 sentence if verification was partial (e.g. "10 of 114 references were
 verified against real bibliographic data before credits ran out") --
-never as a footnote after the findings.
+never as a footnote after the findings. If step 2's tracking table ended
+up with only a condensed (not near-verbatim) record for some entries, say
+so here too, with a count (e.g. "full per-claim detail is preserved for
+72 of 114 checked claims; the rest were condensed during tracking and
+would need re-verification to audit down to the individual claim level")
+-- this is a real limitation on how far a reader can independently audit
+this report, not a footnote to bury.
 
 ### Closing block -- disclaimer, scope, and accreditation
 
