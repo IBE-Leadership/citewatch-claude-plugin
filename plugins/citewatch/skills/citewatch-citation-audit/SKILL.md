@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.14"
+  version: "2.15"
 ---
 
 # CiteWatch citation audit workflow
@@ -124,6 +124,32 @@ the most specific attributable text for each source, falling back to the
 full shared sentence only when the text doesn't distinguish per-source
 attribution.
 
+### Locate the sentence within its own paragraph -- never just "the paragraph's longest sentence"
+
+A paragraph often carries more than one citation, each supporting its own
+distinct point. Picking "the longest/most substantive sentence in the
+paragraph containing this reference's citation" and using that as
+`claim_text` is not a safe shortcut -- that sentence can easily belong to a
+*different* citation in the same paragraph rather than the one it's being
+attached to. This has happened in practice: across one audit, 148 of 169
+references (88%) were submitted with `claim_text` that was actually about a
+neighboring citation, not the reference it was filed under -- every one of
+those came back as an apparent "not supported by abstract" finding that was
+really just wrong input, not a genuine flag.
+
+Do it mechanically instead: within the citation's own paragraph, find the
+specific in-text citation string for *this* reference (the literal
+"(Smith, 2020)" or "Smith (2020)" occurrence), then extract only the
+sentence bounded by the nearest periods that actually contains that
+occurrence -- not the paragraph's first sentence, not its longest sentence,
+not whichever sentence looks the most substantive. Before submitting,
+confirm the reference's own surname (or, for a source without a clear
+surname, the first significant word of its citation) literally appears in
+the `claim_text` you're about to send. If it doesn't, the extraction picked
+the wrong sentence -- go back and find the right one rather than submitting
+it anyway. This check is cheap and mechanical, and it catches exactly the
+failure mode above before it ever reaches CiteWatch.
+
 ### On a large manuscript, this is a real scope decision -- make it out loud, not silently
 
 Full `claim_text` coverage means a *second* complete pass over the body
@@ -225,6 +251,19 @@ real certificate. Forgetting to propagate the id isn't silently dangerous
 any more (each call would just start its own session, visible immediately
 as a low `entries_included` count when you generate the certificate), but
 getting it right the first time avoids that friction entirely.
+
+**If you need to redo part of an already-certified audit -- resubmitting
+corrected `claim_text`, re-checking a reference, anything -- start a fresh
+`audit_session_id` rather than reusing the one from the certified session.**
+Reusing a session id after `generate_verification_certificate` has already
+been called on it has been observed to make CiteWatch silently return
+`"unmatched"` for references that had verified perfectly fine originally --
+not an error, nothing to signal the session is stale, just a wrong-looking
+result. Omit `audit_session_id` on the first call of the redo pass so the
+server issues a new one, track it separately from the original, and
+generate a separate certificate for the corrected pass at the end (per step
+7) rather than trying to fold corrected results back into the
+already-certified session.
 
 **Step A -- Size up the document before touching it.** Decide which of
 three cases you're in, and commit to the matching unit of work before
