@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.19"
+  version: "2.20"
 ---
 
 # CiteWatch citation audit workflow
@@ -175,6 +175,19 @@ always true for a properly formatted entry. Only fall back to
 `reference_string` alone for a field the entry is genuinely too malformed
 to parse -- and when that happens, the malformation itself is worth
 flagging per step 6's **[XX]** category, not silently worked around.
+
+`cited_venue` specifically also feeds a server-side safety net against a
+different, riskier failure than a year mismatch: several real references
+(Babbie 2020, Donabedian 1988, Kline 2016, Field 2018) confidently
+attached to a clearly DIFFERENT work that just happened to share a similar
+or generic title -- a different edition, an unrelated paper the fuzzy
+title scorer over-credited. The server now checks whether a candidate
+disagrees with the cited authors AND year AND venue all at once before
+accepting a title-only match, and routes it to "no confident match"
+instead when all three disagree -- but that check only has data to work
+with when you actually supplied `cited_venue` in the first place. Omitting
+it doesn't just lose one metadata field from the report; it removes one of
+the three signals this specific safety net depends on.
 
 ### On a large manuscript, this is a real scope decision -- make it out loud, not silently
 
@@ -544,7 +557,8 @@ beyond matched/confidence, full stop -- don't go looking for a
 A non-empty list -- e.g. `["retracted"]`, `["metadata_mismatch:pages"]`,
 `["low_confidence"]`, `["unmatched"]`, `["web_search_only"]`,
 `["claim_contradicted"]`, `["claim_methodology_flag"]`,
-`["claim_unverifiable"]`, `["orphaned_citation"]`, or a
+`["claim_unverifiable"]`, `["claim_check_parse_error"]`,
+`["orphaned_citation"]`, or a
 `journal_quality_concern` flag for a blacklisted/flagged journal -- means
 the entry ALSO includes a `detail` object with everything needed to write
 that report entry: full `matched_metadata`, `metadata_checks` (per-field
@@ -558,14 +572,31 @@ too.
 **One citation, many claims.** The same reference can be cited more than
 once with a different attributable claim each time, so `claim_support` in
 every response (compact or detail) is a *count*, not a single verdict:
-`{"claims_checked": N, "claims_flagged": N, "claims_unverifiable": N}` --
-"how many claims were checked against this reference, and how many of
-those held up." The full per-claim breakdown -- each claim's own text,
-verdict, confidence, rationale, methodology flag/note -- is in
-`detail.claims` (a list, one entry per claim actually submitted) whenever
-`flags` is non-empty, or via `get_reference_detail` otherwise. Don't look
-for a single `claim_support.verdict`/`claim_support.checked` field
-anymore -- that shape is gone; iterate `detail.claims` instead.
+`{"claims_checked": N, "claims_flagged": N, "claims_unverifiable": N,
+"claims_parse_failed": N}` -- "how many claims were checked against this
+reference, and how many of those held up." The full per-claim breakdown --
+each claim's own text, verdict, confidence, rationale, methodology
+flag/note -- is in `detail.claims` (a list, one entry per claim actually
+submitted) whenever `flags` is non-empty, or via `get_reference_detail`
+otherwise. Don't look for a single `claim_support.verdict`/
+`claim_support.checked` field anymore -- that shape is gone; iterate
+`detail.claims` instead.
+
+**`claims_parse_failed` is a fourth, distinct state from
+`claims_unverifiable` -- never fold them together.** Confirmed live: ~13%
+of a real audit's claim checks came back as a fabricated-looking
+`CANNOT_ASSESS` verdict with the rationale "unparseable model response" --
+indistinguishable from a genuine inconclusive judgment unless you happened
+to read that exact rationale text. The server now detects this itself
+(retries once internally before giving up) and reports it as `checked:
+false`, `skipped_reason: "claim_check_parse_error"` in `detail.claims`,
+with its own `claim_check_parse_error` flag and its own `claims_parse_failed`
+count -- **this means the tool broke on that claim, not that there was
+genuinely nothing to check it against** (that's `claims_unverifiable`/
+`no_abstract_available`, an entirely different, permanent condition -- see
+step 6.5's Contextual Misuse Flags section for how to report the two
+differently). Never write a `claims_parse_failed` entry into the report as
+if it were a checked-and-inconclusive claim.
 
 For a reference that came back clean (`flags: []`) but you still want the
 full detail for -- to read its abstract yourself independent of an
@@ -824,12 +855,30 @@ things. A reference can contribute more than one claim to these totals
 |---|---|
 | Cited claims checked against abstract | sum of every reference's `claim_support.claims_checked` (this row alone is % of total bibliography entries, not of itself) |
 | Flagged: unsupported, contradicted, or methodology mismatch | sum of every reference's `claim_support.claims_flagged` -- see `detail.claims` for which specific claim(s) on a given reference triggered it |
+| Not assessed: no abstract/summary existed to check against (permanent) | sum of every reference's `claim_support.claims_unverifiable` |
+| Not assessed: tool error, response unparseable even after retry | sum of every reference's `claim_support.claims_parse_failed` -- see the note below; never merge this row with the one above |
 
-Omit both rows entirely if no claims were checked at all (rather than
+The last two rows are both "not assessed," but for entirely different
+reasons a reader needs to be able to tell apart: "no abstract/summary
+existed" is a **permanent, structural** limit (an older monograph or
+textbook genuinely has no indexed abstract anywhere -- re-running the
+audit will never resolve it), while "tool error" is a **transient**
+failure of this specific run (the claim-check call itself broke) that a
+later re-run could plausibly fix. Never report a `claims_parse_failed`
+entry the same way you'd report a `claims_unverifiable` one -- if the
+parse-failed count is nonzero, say so explicitly and suggest a
+`force_refresh` re-run for just that handful of references rather than
+treating the result as final.
+
+Omit all four rows entirely if no claims were checked at all (rather than
 writing `0 (0%)`) -- unlike the escalation rows above, which reflect
 something the server does automatically for every reference, this only
 ever reflects a scope decision you made about which claims to submit, so
-its absence needs no explicit zero to be self-explanatory.
+its absence needs no explicit zero to be self-explanatory. Once any claim
+has been checked, though, write out all four rows explicitly, `0 (0%)`
+included for whichever of the last two are zero -- a reader needs to see
+that the parse-failure count was checked and came back zero, not just
+never mentioned.
 
 Follow with a short **Critical Issues** list (numbered, most severe
 first) -- confirmed retractions, foundational/heavily-cited sources that
@@ -1001,15 +1050,28 @@ that CiteWatch independently resolved to the same underlying source
 no DOI) -- either the same paper cited twice under different wording, or a
 genuine duplicate bibliography entry.
 
+**Read each group's `kind` field before deciding how to present it.**
+`"duplicate"` is the ordinary case above. `"possible_edition_variant"`
+means the group's own entries cite *different years* -- confirmed live: a
+book's DOI/catalog record is often assigned to a single canonical work
+regardless of edition, so Creswell (2014, 4th ed., solo-authored) and
+Creswell & Creswell (2018, 5th ed., co-authored) resolved to the same
+underlying record and were wrongly reported as a flat duplicate. Report a
+`"possible_edition_variant"` group as "these entries cite different years
+and may be different editions of the same work -- verify this was
+intentional," never as "you cited the same source twice." Treating a
+genuine two-edition citation as a flat duplicate is a false accusation the
+author then has to push back on for a perfectly ordinary citation choice.
+
 List every group: how many entries it contains, and the reference strings
-as submitted, verbatim. State plainly that a duplicate group doesn't by
-itself mean the bibliography is *wrong* -- it can be an intentional
-re-citation the author formatted inconsistently, or a genuine accidental
-duplicate; either way it's worth the user's attention, but present it as
-something to check, not a confirmed error. Skip this section entirely
-(don't write a "no duplicates found" line) if `duplicate_reference_groups`
-comes back empty -- same discipline as the Contextual Misuse Flags
-section below for an empty result.
+as submitted, verbatim. For an ordinary `"duplicate"` group, state plainly
+that it doesn't by itself mean the bibliography is *wrong* -- it can be an
+intentional re-citation the author formatted inconsistently, or a genuine
+accidental duplicate; either way it's worth the user's attention, but
+present it as something to check, not a confirmed error. Skip this
+section entirely (don't write a "no duplicates found" line) if
+`duplicate_reference_groups` comes back empty -- same discipline as the
+Contextual Misuse Flags section below for an empty result.
 
 ### 5. Contextual Misuse Flags
 
@@ -1092,7 +1154,25 @@ often because no abstract or summary exists for that source. Never
 present these as `SUPPORTED` or otherwise fold them into the flagged-
 claims list above -- they are a third, distinct state (attempted and
 inconclusive, not checked-and-clean and not checked-and-flagged), and a
-reader needs to be able to tell all three apart.
+reader needs to be able to tell all three apart. Frame this subheading's
+entries as a **permanent, structural** limit, not a bug -- confirmed
+pattern: an older monograph or textbook (e.g. a foundational 1970s-1980s
+methods text) genuinely has no abstract indexed anywhere, on any source,
+and no amount of re-running the audit will change that.
+
+List every claim where `skipped_reason` is `"claim_check_parse_error"`
+under a **separate, third** subheading -- "Claims Where the Check Itself
+Failed" or similar -- never merged into "Claims Submitted But
+Unverifiable" above. Confirmed live: ~13% of a real audit's claim checks
+came back this way, and burying them in the same bucket as
+"no_abstract_available" hides a real, transient tool malfunction behind
+language that reads as a permanent data-availability limit. Say plainly
+that these represent the check *itself* failing (the LLM call's response
+couldn't be parsed, even after an internal retry) -- not a judgment about
+the claim or the source -- and that a `force_refresh` re-run of just
+these specific references would likely produce a real verdict. Never
+present a parse-failed entry as `CANNOT_ASSESS` or any other verdict; it
+has no verdict at all.
 
 State the coverage explicitly at the top of this section: how many
 claims were checked out of how many references in the bibliography (this
