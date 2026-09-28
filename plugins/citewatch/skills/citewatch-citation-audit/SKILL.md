@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.20"
+  version: "2.21"
 ---
 
 # CiteWatch citation audit workflow
@@ -364,7 +364,13 @@ Alongside the unit todo list, if the same reference is likely to recur
 across multiple chapters/sections (common in theses, edited volumes,
 compiled reports), also start a reference-tracking table now: one row
 per unique reference, with its reference string, a status field starting
-at "not yet checked", and a citing-locations list. Populate and update
+at "not yet checked", a citing-locations list, and its `match_method`
+once verified (`doi`, `cache`, `doi_corrected`, `web_search`, `none`,
+etc.) -- not only the verdict/status, since `match_method` is a strong
+prior on how much to trust a given flag (see step 6's **[!!]** section
+and the Contextual Misuse Flags section below) and is easy to lose if it's
+only ever written into the final report and never retained here. Populate
+and update
 this table incrementally as you complete each unit in Step C below --
 **not** via a separate whole-document read done first. The first time you
 reach a given reference, verify it and record the result in this table.
@@ -407,10 +413,15 @@ audit's condensed tracking files preserved full per-claim detail for only
 final report couldn't be traced back to the raw tool output at all without
 re-spending credits to re-run verification. Where you have the room for
 it, persist the response body (or at minimum every field the report
-actually draws on: `flags`, `detail.matched_metadata`,
+actually draws on: `match_method`, `flags`, `detail.matched_metadata`,
 `detail.metadata_checks`, `detail.claims`, `detail.escalation`,
 `detail.retraction`, `detail.journal_quality`) rather than a condensed
-paraphrase. If space or environment constraints genuinely force
+paraphrase. `match_method` specifically is worth naming explicitly here,
+not just implied by "the response body" -- it's easy to drop when
+condensing since it isn't itself a verdict, but a report needs it later to
+apply the **[!!]** section's direct-verification requirement and the
+Contextual Misuse Flags section's per-entry confidence weighting. If space
+or environment constraints genuinely force
 condensing for some or all entries, that's an acceptable tradeoff -- but
 disclose it as an explicit limitation in the final report (how many
 entries have only a condensed record, not full per-claim/per-field
@@ -544,11 +555,24 @@ returns only what's needed to write one clean report line.**
 
 Each entry now comes back with: `matched`, `match_confidence`,
 `match_method`, `doi`, `title`, `journal_matched` (bool), `quartile`,
-`abstract_available` (bool, not the abstract text itself), `flags` (a
-list of short strings), a compact `claim_support`
+`same_doi_as_cited` (bool or `null` -- see below), `abstract_available`
+(bool, not the abstract text itself), `flags` (a list of short strings), a
+compact `claim_support`
 (`checked`/`verdict`/`methodology_flag`/`skipped_reason` -- no
 `rationale`/`confidence`/`methodology_note` at this level), and the usual
 `credits_charged`/`credit_balance(_after)`.
+
+**`same_doi_as_cited` is computed whenever both DOIs are known, not just
+on a flagged entry.** `true` when the cited DOI (yours, if supplied, or
+whatever the server extracted from `reference_string`) and the matched
+record's own DOI are the same underlying identifier; `false` when they're
+different known DOIs; `null` when either side is unknown. Treat it as one
+input to weigh, not an automatic verdict on its own: `true` alongside a
+`metadata_mismatch:*` flag is a strong signal this is the same source with
+messy/mirrored metadata rather than a wrong match (see the **[!!]** section
+below), but `false` on its own doesn't prove a wrong match either --
+confirm with a direct title/author comparison before characterizing an
+entry as "wrong item matched," same as `null`.
 
 **`flags` is the signal to read, not any of the raw fields it used to
 take their place.** An empty list means exactly that: nothing to report
@@ -806,6 +830,26 @@ require manual follow-up, not automatic suspicion.
 
 ### 1. Executive Summary
 
+**Before drafting this section, or Critical Issues, or Recommendations:
+build a small labeled cross-check table first.** One row per flag/field
+category this report will cite a count for (e.g. `claim_methodology_flag`,
+high-confidence `claim_contradicted`/`claim_not_supported`,
+`metadata_mismatch:*`, `retracted`, `unmatched`), one column for the count
+itself -- computed directly from your tracking table/raw tool results, not
+typed from memory. Confirmed in practice: a real report's first draft
+substituted the count of references carrying a `claim_methodology_flag`
+(44) for the count of references with a high-confidence
+`claim_contradicted`/`claim_not_supported` verdict (the correct figure was
+29 high-confidence / 36 any-confidence) in the Executive Summary, Critical
+Issues, and Recommendations sections alike -- a copy/label mix-up during
+synthesis, not a tool error, and one a labeled table computed once and
+referenced by every section would have caught immediately. Every headline
+count that appears in this section's prose, in Critical Issues, or in
+Recommendations must name the specific flag/field it was computed from --
+inline (e.g. "44 references carry `claim_methodology_flag`") or in a
+footnote -- not stated as a bare number. A count with no named source field
+does not belong in the report.
+
 A metrics table, computed from your actual tool results (not estimated).
 Every row is a count **and its percentage of total bibliography entries
 audited** (e.g. `12 (11%)`), not a bare count -- this matters specifically
@@ -970,6 +1014,26 @@ take priority over a plain "something's flagged"):
   typo (e.g. a missing volume number) -- present it as "check this
   entry's completeness," not as an accusation that the wrong source was
   found.
+
+  **Never write a "wrong item," "wrong edition," or "matched a different
+  record" characterization from `metadata_mismatch:*` flags alone.**
+  Confirmed in practice: two "wrong item/edition" characterizations in a
+  real report (Hartley, 2005; Cohen, Manion & Morrison, 2018) were written
+  based on inferring from the presence of mismatch flags, without
+  independently resolving the matched DOI/title first -- both turned out
+  to be correct matches on direct verification (identical DOI, matching
+  title/edition). Before writing that kind of characterization for any
+  entry, resolve the matched DOI/title independently and compare it
+  directly against the cited reference's own title/authors/edition:
+  check `same_doi_as_cited` first when it's present (`true` means this is
+  the same underlying source with messy/mirrored metadata, not a wrong
+  match -- see the field's own description above); otherwise call
+  `get_reference_detail` or look the matched DOI up directly (e.g. via
+  Crossref) and compare its title/authors/edition against what the
+  manuscript cites yourself. Record which of these you did. Only write a
+  "wrong item/edition matched" characterization once that direct
+  comparison actually shows a different work -- never from the mismatch
+  flag pattern by itself.
 - **[OK]** `matched: true`, `flags: []`.
 
 **Automatic web-search/scrape escalation.** The server automatically falls
@@ -995,13 +1059,18 @@ it. It surfaces in the response as:
   insufficient-credits handling above changes.
 
 Table columns: `#`, `Entry` (as cited), `Status`, `Confidence` (from
-`match_confidence`, or "N/A" if unmatched), `Notes` (the specific
-mismatched field with its `detail.metadata_checks[field].cited`/`.found`
-values, retraction reason, or journal-quality concern -- concrete, not
-vague; pull these from `detail`, present whenever `flags` is non-empty).
-For a document processed via the tracking file in step 2, add a
-`Cited from` column listing every chapter/page location on record for
-that reference, instead of just the first one encountered.
+`match_confidence`, or "N/A" if unmatched), `Match method` (from
+`match_method` -- `doi`, `cache`, `doi_corrected`, `web_search`, `none`,
+etc.; carried forward from the tracking table per step 2, not re-derived
+-- a strong prior on how much to trust the row, same reasoning as the
+Contextual Misuse Flags section's own per-entry `match_method` column),
+`Notes` (the specific mismatched field with its
+`detail.metadata_checks[field].cited`/`.found` values, retraction reason,
+or journal-quality concern -- concrete, not vague; pull these from
+`detail`, present whenever `flags` is non-empty). For a document processed
+via the tracking file in step 2, add a `Cited from` column listing every
+chapter/page location on record for that reference, instead of just the
+first one encountered.
 
 ### 3. Orphan Citations
 
@@ -1062,6 +1131,16 @@ and may be different editions of the same work -- verify this was
 intentional," never as "you cited the same source twice." Treating a
 genuine two-edition citation as a flat duplicate is a false accusation the
 author then has to push back on for a perfectly ordinary citation choice.
+
+The same direct-verification requirement from step 6's Full Verification
+Table section (**[!!]**'s "never write a 'wrong item'... characterization
+from `metadata_mismatch:*` flags alone" paragraph) applies here too:
+before describing any group's members as citing genuinely different
+underlying works (as opposed to `"duplicate"` or
+`"possible_edition_variant"`, both of which mean CiteWatch itself resolved
+them to the same underlying record), resolve and compare the entries
+directly rather than inferring it from the group's own `kind` label or
+metadata alone.
 
 List every group: how many entries it contains, and the reference strings
 as submitted, verbatim. For an ordinary `"duplicate"` group, state plainly
@@ -1242,6 +1321,38 @@ so here too, with a count (e.g. "full per-claim detail is preserved for
 would need re-verification to audit down to the individual claim level")
 -- this is a real limitation on how far a reader can independently audit
 this report, not a footnote to bury.
+
+### 9. Adversarial pass before finalizing
+
+Before presenting the report as final, run one dedicated pass whose only
+job is to try to disprove every item in the draft Critical Issues list
+(section 1) and every "wrong item/edition matched" note (sections 2 and
+4): re-pull the primary data behind each one (the matched DOI record, the
+raw abstract, the raw flag source in your tracking table) and actively
+look for a reason it could be a false positive or a mislabeled figure,
+rather than assuming the first-pass classification is correct.
+
+This is not optional, and it runs by default on every report -- not only
+when the user explicitly asks for a skeptical or adversarial re-review.
+Confirmed in practice: the two drafting errors described in step 6's
+**[!!]** section and this section's own opening paragraph above (Hartley/
+Cohen-Manion-Morrison wrongly characterized as wrong-item matches; a
+methodology-flag count substituted for a contradicted-claim count) were
+only caught because the user separately asked for a manual adversarial
+re-review after the report had already been delivered -- the original
+drafting process had no equivalent internal check. Treat that request as
+the standing bar for every report, not a one-off ask.
+
+For each candidate Critical Issue:
+- If it's a "wrong item/edition matched" claim, confirm the direct DOI/
+  title comparison required by step 6's **[!!]** section was actually
+  performed and actually supports it -- not inferred from flags alone.
+- If it's a headline count, confirm it traces to the specific named flag/
+  field from this section's own cross-check table (see section 1) and
+  that the count in the draft text still matches that table exactly.
+- If re-pulling the primary data contradicts the draft classification,
+  remove or reword the item before the report is delivered -- do not
+  leave it as originally drafted because it was already written.
 
 ### Closing block -- disclaimer, scope, and accreditation
 
