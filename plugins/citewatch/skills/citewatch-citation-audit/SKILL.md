@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.23"
+  version: "2.24"
 ---
 
 # CiteWatch citation audit workflow
@@ -828,7 +828,11 @@ unasked:
    real text instead of staying unverified. Say plainly that they must have
    lawful access to each document, that CiteWatch keeps a file for at most
    30 days, and that they will be asked to confirm every suggested
-   file-to-reference match before anything is used.
+   file-to-reference match before anything is used. Also say that **storing a
+   document costs credits** -- 0.02 per MB with a 0.05 minimum per file, charged
+   once when the file is stored (a typical article is 0.05, a large chapter a few
+   tenths) -- and that there is no limit on how many documents they can add, so
+   they can upload every full text they have.
 2. If they agree, call `request_fulltext_upload(audit_session_id,
    reference_strings)` with the affected references' exact strings, and
    **hand the user the `upload_url` and stop.** They open it, tick the
@@ -848,6 +852,13 @@ unasked:
 4. Do this **before** `generate_verification_certificate`: a certified
    audit is closed and cannot accept uploads (start a new `audit_session_id`
    to redo it).
+
+CiteWatch also keeps, for the same 30 days and at the same storage rate, a copy of
+any open-access full text it legally downloaded to check a claim (licences that permit
+reuse only). A `fulltext_storage` object on a reference's response says whether that copy
+was saved, what it cost, or why it was not (for example `insufficient_credits`); the
+verification itself is unaffected either way. Mention these small storage charges when
+summarising credit spend, and never describe a saved copy as something the user uploaded.
 
 If the user declines, cannot upload, or simply never does, the audit stands
 as it is. In that case the report **must** say so: list the claims that
