@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.21"
+  version: "2.22"
 ---
 
 # CiteWatch citation audit workflow
@@ -582,7 +582,10 @@ A non-empty list -- e.g. `["retracted"]`, `["metadata_mismatch:pages"]`,
 `["low_confidence"]`, `["unmatched"]`, `["web_search_only"]`,
 `["claim_contradicted"]`, `["claim_methodology_flag"]`,
 `["claim_unverifiable"]`, `["claim_check_parse_error"]`,
-`["orphaned_citation"]`, or a
+`["orphaned_citation"]`, an
+`integrity_notice:<status>` flag (`partial_retraction`,
+`expression_of_concern` or `corrected` -- an editorial notice short of a
+retraction; report it as exactly that, never as "retracted"), or a
 `journal_quality_concern` flag for a blacklisted/flagged journal -- means
 the entry ALSO includes a `detail` object with everything needed to write
 that report entry: full `matched_metadata`, `metadata_checks` (per-field
@@ -751,6 +754,12 @@ of which require this same raw-vs-reconciled breakdown, not a bare count.
 
 `check_journal_quality` and `check_retraction_status` are also free and
 can be run per matched source without affecting the credit budget.
+`check_retraction_status` returns a severity ladder in `status`
+(`retracted`, `partial_retraction`, `expression_of_concern`, `corrected`,
+`clean`, `unknown`) plus the individual `notices`, drawn from Retraction
+Watch and Crossref's editorial notices. `notices_checked: false` means
+the Crossref lookup failed and only Retraction Watch was consulted --
+say so rather than reporting a clean result as fully checked.
 
 ## 4. Before spending any paid credits, check the budget and ask if it's tight
 
@@ -783,6 +792,26 @@ Presenting this choice *before* spending credits is good practice -- keep
 doing it. What must never happen is spending down to zero and then
 continuing anyway on the model's own knowledge without the user having
 agreed to that scope.
+
+### Optional: how has a flagged source been received? (`check_citation_standing`)
+
+`check_citation_standing(doi)` costs 3 credits (refunded if nothing is
+found) and reports how later open-access papers cite a given DOI:
+supporting, contrasting or mentioning, with example sentences. Use it
+only when it helps the user decide about a specific source -- for example
+a foundational reference whose claims you flagged, or one the user says is
+contested -- and ask before spending credits on it, exactly as for any
+other paid step. It is **not** a check of the manuscript's own claim (that
+is what `claim_text` is for), and it is **not** run by default.
+
+It is a sample, not a census: only open-access, commercially reusable
+full text in Europe PMC is read, so non-biomedical citing papers are never
+examined. Always quote the returned `coverage_note` next to any tally, and
+never say a paper is "uncontested" or "well supported" because
+`contrasting` is 0 or `supporting` is high when coverage is thin. Sentences
+with `co_cited > 0` cite other papers too and may not be about this one.
+If it returns `classified: false`, the statements are unlabelled -- don't
+label them yourself.
 
 ## 5. If you hit `insufficient_credits`, stop -- this is not optional
 
@@ -867,6 +896,7 @@ categories represent, not just an absolute number:
 | DOI corrected (cited DOI didn't resolve; automated repair found and verified the right one) | `"doi_corrected" in flags` -- see **[DC]** below |
 | Unverifiable (no match found) | `"unmatched" in flags` and no `"grey_literature"` |
 | Retracted | `"retracted" in flags` |
+| Editorial notice short of retraction (correction, expression of concern, partial retraction) | any flag starting with `integrity_notice:` -- report separately from Retracted |
 | Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | any flag starting with `metadata_mismatch:` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
 | Duplicate reference entries | from `generate_verification_certificate`'s `duplicate_reference_groups` (only available after that tool has been called -- see its own section below) |
 | In-text citations missing from bibliography | genuine count **after** reconciliation (step 3's mandatory reconciliation, not the raw `orphaned_citations` count) -- state both, e.g. "2 (raw: 14)" |
@@ -1275,13 +1305,22 @@ disclosure step 4 already requires for the credit budget -- a scope
 decision stated in the open, not a gap left for the reader to notice on
 their own.
 
-**Abstract-level only, say so.** This check compares the claim against
-the source's *abstract*, not its full text -- a claim can pass (even
-`SUPPORTED`) and still misrepresent something only visible in the body,
-methods, or limitations section that the abstract never mentions. State
-this plainly wherever you report claim-check results, and don't let a
-clean result here read as a stronger guarantee than it is, especially for
-claims central to the manuscript's own argument.
+**Say which evidence each verdict rests on.** Each entry in
+`detail.claims` has an `evidence_level`: `"abstract"` (the claim was
+compared against the source's abstract only) or `"full_text"` (the server
+also read relevant paragraphs of the source's open-access full text, which
+only exists for some, mostly biomedical, sources). A `full_text` verdict
+may carry `evidence_section` and `evidence_quote`; quote it only when
+`evidence_quote_verified` is `true` (the server confirmed the quote is
+verbatim from the source), and otherwise treat the quote as absent.
+`claim_support.claims_full_text` counts how many checked claims used full
+text. For `abstract` verdicts the old limitation stands: a claim can pass
+(even `SUPPORTED`) and still misrepresent something only visible in the
+body, methods, or limitations section that the abstract never mentions.
+State plainly, in the report, how many claim checks were full-text versus
+abstract-only, and don't let a clean result read as a stronger guarantee
+than its evidence level supports, especially for claims central to the
+manuscript's own argument.
 
 ### 6. Journal Quality Distribution
 
