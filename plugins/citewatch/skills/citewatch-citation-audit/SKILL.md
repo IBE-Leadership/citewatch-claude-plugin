@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires a connected CiteWatch MCP server (any connector name -- this skill does not assume a specific tool-name prefix). See https://citewatch.app/setup to connect one.
 metadata:
   author: CiteWatch
-  version: "2.22"
+  version: "2.23"
 ---
 
 # CiteWatch citation audit workflow
@@ -813,6 +813,48 @@ with `co_cited > 0` cite other papers too and may not be about this one.
 If it returns `classified: false`, the statements are unlabelled -- don't
 label them yourself.
 
+### Optional: let the user supply full text for sources that couldn't be checked (`request_fulltext_upload`)
+
+Some references cannot be checked against what they actually say: claims
+that came back `claim_unverifiable` / `no_abstract_available` (textbook
+chapters, old monographs, anything with no abstract indexed anywhere),
+paywalled sources, `grey_literature`, or references that stayed
+`unmatched`. Before generating the certificate, offer the user the chance
+to supply those documents -- this is an offer, never something you do
+unasked:
+
+1. Tell the user which references (and how many claims) are affected and
+   what uploading would change: their claims would be checked against the
+   real text instead of staying unverified. Say plainly that they must have
+   lawful access to each document, that CiteWatch keeps a file for at most
+   30 days, and that they will be asked to confirm every suggested
+   file-to-reference match before anything is used.
+2. If they agree, call `request_fulltext_upload(audit_session_id,
+   reference_strings)` with the affected references' exact strings, and
+   **hand the user the `upload_url` and stop.** They open it, tick the
+   consent box, upload the PDFs (several at once is fine, PDFs with a text
+   layer only), review CiteWatch's suggested matches and confirm them. The
+   link lasts 24 hours; call the tool again for a fresh one. Never ask the
+   user to paste document text into the chat, never try to upload files
+   yourself, and never treat an unconfirmed upload as verification --
+   nothing counts until the user confirms the match on that page.
+3. When the user says they are done, re-read the affected references with
+   `get_reference_detail` (free). Their `claims` now show
+   `evidence_level: "uploaded_full_text"` where a check ran against an
+   uploaded document, and only those claims were re-run; everything else in
+   the audit is unchanged. A reference with `user_upload_resolved` in its
+   `flags` was previously unmatched and is now identified only by the
+   user's own document (see the legend in step 6).
+4. Do this **before** `generate_verification_certificate`: a certified
+   audit is closed and cannot accept uploads (start a new `audit_session_id`
+   to redo it).
+
+If the user declines, cannot upload, or simply never does, the audit stands
+as it is. In that case the report **must** say so: list the claims that
+remain unverified and state that full text was not provided, in the
+limitations. Those claims are *unverified* -- never describe them, or the
+references behind them, as checked or supported.
+
 ## 5. If you hit `insufficient_credits`, stop -- this is not optional
 
 Every metered tool returns a response containing `"error":
@@ -896,6 +938,7 @@ categories represent, not just an absolute number:
 | DOI corrected (cited DOI didn't resolve; automated repair found and verified the right one) | `"doi_corrected" in flags` -- see **[DC]** below |
 | Unverifiable (no match found) | `"unmatched" in flags` and no `"grey_literature"` |
 | Retracted | `"retracted" in flags` |
+| References verified against submitter-provided full text / resolved from an uploaded document only | `fulltext_verified_count` and `fulltext_resolved_count` from `generate_verification_certificate` -- report them as two separate counts, never add them together or describe them as a score |
 | Editorial notice short of retraction (correction, expression of concern, partial retraction) | any flag starting with `integrity_notice:` -- report separately from Retracted |
 | Metadata/completeness mismatches (title/authors/year/venue/volume/issue/pages) | any flag starting with `metadata_mismatch:` -- percentaged against `matched` count, not total, since an unmatched entry has nothing to compare against |
 | Duplicate reference entries | from `generate_verification_certificate`'s `duplicate_reference_groups` (only available after that tool has been called -- see its own section below) |
@@ -1036,7 +1079,7 @@ take priority over a plain "something's flagged"):
   or non-English-language publication not yet indexed)." Never phrase it in
   a way a reader could mistake for something the tool itself confirmed.
 - **[!!]** `matched: true` but `flags` is non-empty and none of the above
-  apply -- any of `metadata_mismatch:<field>`, `low_confidence`,
+  apply (`user_upload_resolved` is one of these, see below) -- any of `metadata_mismatch:<field>`, `low_confidence`,
   `web_search_only`, `journal_quality_concern`, `claim_not_supported`,
   `claim_contradicted`, `claim_methodology_flag`, `claim_unverifiable`. A
   `metadata_mismatch:` flag can mean the wrong paper was matched, but just
@@ -1077,6 +1120,13 @@ it. It surfaces in the response as:
   Always treat as **[!!]**, never as a plain **[OK]**, regardless of
   `match_confidence`. Since this flag is always non-empty, `detail` is
   always present for these.
+- `"user_upload_resolved" in flags` -- the reference was `unmatched` and
+  the user then uploaded a document whose title matched it
+  (`match_method: "user_upload"`, `match_confidence: "low"` always). Its
+  identity rests on the user's own document, not a bibliographic index.
+  Always treat as **[!!]**, never as a plain **[OK]** and never as
+  independently verified; write it as "resolved from a document uploaded by
+  the submitter".
 - `detail.escalation.verification_note` -- a short explanation to carry
   into your `Notes` column whenever present (e.g. why a web-search match
   should be treated with extra caution, or that a second opinion
@@ -1307,9 +1357,14 @@ their own.
 
 **Say which evidence each verdict rests on.** Each entry in
 `detail.claims` has an `evidence_level`: `"abstract"` (the claim was
-compared against the source's abstract only) or `"full_text"` (the server
+compared against the source's abstract only), `"full_text"` (the server
 also read relevant paragraphs of the source's open-access full text, which
-only exists for some, mostly biomedical, sources). A `full_text` verdict
+only exists for some, mostly biomedical, sources), or `"uploaded_full_text"`
+(the claim was checked against a document the submitter uploaded -- a
+stronger check than an abstract, but the document is the submitter's own
+and CiteWatch cannot independently corroborate it, so always say "checked
+against submitter-provided full text" and keep these separate from
+server-fetched `full_text` checks). A `full_text` verdict
 may carry `evidence_section` and `evidence_quote`; quote it only when
 `evidence_quote_verified` is `true` (the server confirmed the quote is
 verbatim from the source), and otherwise treat the quote as absent.
