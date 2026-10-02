@@ -1330,6 +1330,16 @@ pattern: an older monograph or textbook (e.g. a foundational 1970s-1980s
 methods text) genuinely has no abstract indexed anywhere, on any source,
 and no amount of re-running the audit will change that.
 
+A claim whose `skipped_reason` is `"low_confidence_match"` also belongs
+under "Claims Submitted But Unverifiable", but say *why* in its entry: the
+record the reference was matched to is a low-confidence match (typically a
+different edition, a book review or an unrelated paper that shares title
+words), so the claim was deliberately **not** judged against it -- a
+verdict from the wrong document would misrepresent the cited source. Never
+present these as supported or unsupported. Tell the user the way to get
+them checked: supply the correct DOI or the source text (see
+`request_fulltext_upload`).
+
 List every claim where `skipped_reason` is `"claim_check_parse_error"`
 under a **separate, third** subheading -- "Claims Where the Check Itself
 Failed" or similar -- never merged into "Claims Submitted But
