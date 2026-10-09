@@ -1410,8 +1410,19 @@ build this table: `journal_matched: false` -> "not matched/no record";
 `"journal_quality_concern" in flags` -> "flagged" (pull the specific
 DHET/Norwegian Register/DOAJ/blacklist reason from that entry's
 `detail.journal_quality`, since a flagged entry always has `detail`
-present). **Do not** characterize this as covering Scopus/Web of
-Science/Scimago quartile data -- see the closing note below on why.
+present). Every entry also carries a compact `accreditation` object
+(`null` = journal not matched or ambiguous): `bodies` (which of DHET,
+Norwegian List, DOAJ actively list the journal), `dhet_lists` (which DHET
+sub-lists carry it: "DHET" = DHET's own South African list; SCOPUS, WOS,
+IBSS, SCIELO SA, DOAJ, NORWEGIAN = international lists DHET recognises),
+`norwegian_level`/`norwegian_level_year` (only Levels 1 and 2 are
+accredited), and `non_active_listings` -- journals that are listed but
+NOT accredited (removed from the DHET list, Norwegian Level 0 "not
+approved", Level X "under review", ceased). Report those explicitly; never
+describe a Level 0/X or removed journal as accredited. The manuscript
+summary's `accreditation_distribution` counts references per body. Scopus/
+Web of Science standing is reported only as DHET flags it (`dhet_lists`),
+not queried directly, and there is no Scimago quartile data.
 
 ### 7. Recommendations (Prioritised)
 
@@ -1488,8 +1499,9 @@ unverifiable does not mean fabricated.
 Scope note: Verification draws on open bibliographic data (OpenAlex,
 Crossref, PubMed, Unpaywall) and open journal-accreditation lists (DHET,
 Norwegian Register, DOAJ). Proprietary/subscription-only indices (e.g.
-Scopus, Web of Science, Scimago) are not queried and this report cannot
-comment on standing in those specific databases.
+Scopus, Web of Science, Scimago) are not queried directly: Scopus/Web of
+Science standing appears only as far as DHET's own list flags it, and this
+report cannot comment on standing in those databases beyond that.
 
 Independent verification certificate: <certificate_url from step 7 below>
 Scan the QR code or open the link to see CiteWatch's own record of what
