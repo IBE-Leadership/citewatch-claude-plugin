@@ -1411,7 +1411,12 @@ build this table: `journal_matched: false` -> "not matched/no record";
 DHET/Norwegian Register/ABDC/DOAJ/blacklist reason from that entry's
 `detail.journal_quality`, since a flagged entry always has `detail`
 present). Every entry also carries a compact `accreditation` object
-(`null` = journal not matched or ambiguous): `bodies` (which of DHET,
+(`null` = journal not matched, ambiguous, or withheld -- see `accreditation_note`.
+Lists are attributed only through the ISSN of the confirmed DOI's journal, never a
+journal name, because predatory journals imitate genuine titles. When the matched work
+is confirmed but the reference names a *different* journal, that work's lists are in
+`matched_work_accreditation` instead -- never present those as the cited journal's):
+`journal` (the journal the lists describe), `bodies` (which of DHET,
 Norwegian List, DOAJ actively list the journal), `dhet_lists` (which DHET
 sub-lists carry it: "DHET" = DHET's own South African list; SCOPUS, WOS,
 IBSS, SCIELO SA, DOAJ, NORWEGIAN = international lists DHET recognises),
